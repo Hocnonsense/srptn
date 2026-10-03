@@ -2,6 +2,7 @@ import io
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from enum import Enum
 from typing import Self, BinaryIO, TypeVar
 from pathlib import Path
@@ -95,6 +96,19 @@ E = TypeVar("E", bound=Entity)
 @dataclass(slots=True)
 class DataStore(ABC):
     """Abstract base class for data stores."""
+
+    def cache(
+        self, address: Address | str, timestamp: datetime | None = None, replace=False
+    ) -> Path:
+        """Return cache space, optionally replacing it with entity data/meta.
+
+        Without a timestamp, refresh the cache's last-access marker.
+        """
+        raise NotImplementedError()
+
+    def clean_cache(self, before: timedelta) -> None:
+        """Delete expired cache branches; before is their maximum age."""
+        raise NotImplementedError()
 
     @abstractmethod
     def clean(self, address: Address) -> None:

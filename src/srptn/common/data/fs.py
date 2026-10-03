@@ -1,6 +1,9 @@
 import io
+import fcntl
 import shutil
+from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 import polars as pl
@@ -14,12 +17,78 @@ class FSDataStore(DataStore):
 
     base_data: Path = Path("datastore/data")
     base_meta: Path = Path("datastore/meta")
+    base_cache: Path = Path("datastore/cache")
+
+    @contextmanager
+    def _cache_lock(self):
+        self.base_cache.mkdir(parents=True, exist_ok=True)
+        with (self.base_cache / ".lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            yield
+
+    def cache(self, address, timestamp=None, replace=False):
+        prefix = ".cache" if timestamp is None else str(timestamp)
+        cache = self.as_path(self.base_cache, f"{prefix}/{address}")
+        with self._cache_lock():
+            if replace:
+                if cache.is_symlink() or cache.is_file():
+                    cache.unlink()
+                elif cache.exists():
+                    shutil.rmtree(cache)
+            cache.mkdir(parents=True, exist_ok=True)
+            if replace and isinstance(address, Address):
+                for file_type in (FileType.DATA, FileType.META):
+                    source = self.files_path(address, file_type)
+                    if source.exists() or source.is_symlink():
+                        shutil.move(str(source), str(cache / file_type.value))
+        if timestamp is None:
+            (cache / ".timestamp").touch()
+        return cache
+
+    def clean_cache(self, before):
+        current = datetime.now(timezone.utc)
+        if before.total_seconds() <= 0:
+            raise ValueError("Cache expiry must be positive")
+        cutoff = (current - before).timestamp()
+
+        def prune(branch):
+            if branch.is_symlink() or not branch.is_dir():
+                branch.unlink()
+                return False
+            marker = branch / ".timestamp"
+            if marker.is_file() and not marker.is_symlink():
+                with marker.open("a") as lock:
+                    try:
+                        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    except BlockingIOError:
+                        return True
+                    if marker.stat().st_mtime >= cutoff:
+                        return True
+            retained = False
+            for child in list(branch.iterdir()):
+                if child.name != ".timestamp":
+                    retained = prune(child) or retained
+            if not retained:
+                shutil.rmtree(branch)
+            return retained
+
+        with self._cache_lock():
+            for entry in self.base_cache.iterdir():
+                if entry.name == ".cache":
+                    prune(entry)
+                elif entry.is_dir() and not entry.is_symlink():
+                    try:
+                        timestamp = datetime.fromisoformat(entry.name)
+                    except ValueError:
+                        continue
+                    if timestamp.tzinfo is None:
+                        timestamp = timestamp.replace(tzinfo=timezone.utc)
+                    if current - timestamp > before:
+                        shutil.rmtree(entry)
 
     def clean(self, address):
-        """Remove metadata and data files associated with the given address."""
-        # FIXME: should shutil.rmtree, or move to a temperary trash bin
-        self.files_path(address, FileType.META).unlink(missing_ok=True)
-        self.files_path(address, FileType.DATA).unlink(missing_ok=True)
+        """Move metadata and data into cache for external garbage collection."""
+        self.cache(address, datetime.now(timezone.utc), replace=True)
 
     def load_sheet(self, address, sheet_name):
         """Load a sample sheet as a Polars DataFrame from the given address."""
