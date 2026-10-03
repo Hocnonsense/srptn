@@ -42,7 +42,9 @@ def workflow_selector(
         st.info("Please provide a workflow URL with a tag or branch")
 
     url = persistent_text_input(
-        "Workflow repository URL (e.g. https://github.com/snakemake-workflows/rna-seq-kallisto-sleuth)",
+        "Workflow repository URL (e.g. https://github.com/snakemake-workflows/rna-seq-kallisto-sleuth, "
+        "you can also explore from "
+        "the [catalog](https://snakemake.github.io/snakemake-workflow-catalog/docs/all_standardized_workflows.html))",
         "workflow-meta-url",
         "https://github.com/snakemake-workflows/rna-seq-kallisto-sleuth",
     )
