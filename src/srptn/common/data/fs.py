@@ -117,12 +117,21 @@ class FSDataStore(DataStore):
             ),
         )
 
-    def has_entity(self, address):
-        """Check if an entity exists for the given address."""
-        return self.desc_path(address).exists()
+    def occupied(self, address):
+        """Check if an entity exists for the given address,
+        or if it is inside any of the data store's file types.
+        """
+        if self.files_path(address, FileType.DATA).exists():
+            return True
+        for parent in self.files_path(address, FileType.META).parents:
+            if (parent / "desc.md").exists():
+                return True
+            if parent == self.base_meta:
+                break
+        return False
 
     @staticmethod
-    def as_path(base: Path, address: Address):
+    def as_path(base: Path, address):
         """Convert a base path and address into a full path."""
         return base / str(address)
 

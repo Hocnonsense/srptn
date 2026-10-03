@@ -22,7 +22,7 @@ analysis_name = persistent_text_input(
 )
 
 address = Address(owner, Analysis, categories=categories, name=analysis_name)
-if data_store.has_entity(address):
+if data_store.occupied(address):
     st.error(f"Analysis {address} already exists")
     st.stop()
 

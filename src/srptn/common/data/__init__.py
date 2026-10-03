@@ -178,8 +178,8 @@ class DataStore(ABC):
         ...
 
     @abstractmethod
-    def has_entity(self, address: Address) -> bool:
-        """Abstract method to check if an Entity exists in the data store."""
+    def occupied(self, address: Address) -> bool:
+        """Abstract method to check if the address is used by an Entity."""
         ...
 
     @abstractmethod

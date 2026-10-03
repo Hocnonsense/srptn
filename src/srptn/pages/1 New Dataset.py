@@ -16,7 +16,7 @@ categories = category_editor("new_dataset-meta")
 dataset_name = st.text_input("Dataset name")
 
 address = Address(owner, Dataset, categories=categories, name=dataset_name)
-if data_store.has_entity(address):
+if data_store.occupied(address):
     st.error(f"Dataset {address} already exists")
     st.stop()
 
