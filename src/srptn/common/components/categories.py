@@ -1,3 +1,5 @@
+import re
+
 import streamlit as st
 
 
@@ -34,7 +36,18 @@ def category_editor(key: str):
         or ""
         for position, cat in enumerate(st.session_state[f"{key}-categories"])
     ]
+    check_path(categories)
     return categories[:-1]
+
+
+def check_path(categories: list[str]):
+    if any(cat.startswith("/") for cat in categories):
+        st.error("Categories cannot start with slashes")
+        st.stop()
+    if {".", ".."} & set("/".join(categories).split("/")):
+        st.error("Invalid '.' and '..' used in category")
+        # TODO: put such user in the black list for warning
+        st.stop()
 
 
 if __name__ == "__main__":
