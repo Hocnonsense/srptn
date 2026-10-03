@@ -1,11 +1,12 @@
 import io
 from dataclasses import dataclass
+from typing import Sequence
 
 import polars as pl
 import streamlit as st
 
-from srptn.common.components.files import file_browser
-from srptn.common.data import Address, DataStore, Entity, FileType
+from ...components.files import file_browser
+from ...data import DataStore, Entity, FileType
 
 
 @dataclass
@@ -13,11 +14,11 @@ class Dataset(Entity):
     """Represents a dataset with associated metadata and data files."""
 
     sheet: pl.DataFrame | None
-    data_files: list[io.BytesIO] | None = None
-    meta_files: list[io.BytesIO] | None = None
+    data_files: Sequence[io.BytesIO] | None = None
+    meta_files: Sequence[io.BytesIO] | None = None
     _data_store: DataStore | None = None
 
-    def show(self) -> None:
+    def show(self):
         """Display the dataset details, sample sheet, and downloadable files."""
         st.header(self.address, divider=True)
         st.markdown(self.desc)
@@ -25,23 +26,23 @@ class Dataset(Entity):
             st.subheader("Sample Sheet")
             st.dataframe(self.sheet)
 
-        meta_files = self.list_files(FileType.META)
-        if not meta_files.is_empty():
-            st.subheader("Meta Files")
-            for name in meta_files["name"]:
-                st.download_button(
-                    name,
-                    self._data_store.load_file(self.address, name, FileType.META),
-                    file_name=name,
-                )
+        if self._data_store is not None:
+            meta_files = self.list_files(FileType.META)
+            if meta_files is not None and not meta_files.is_empty():
+                st.subheader("Meta Files")
+                for name in meta_files["name"]:
+                    with self._data_store.load_file(
+                        self.address, name, FileType.META
+                    ) as file:
+                        st.download_button(name, file, file_name=name)
 
         files = self.list_files(FileType.DATA)
-
-        st.subheader("Files")
-        file_browser(files)
+        if files is not None:
+            st.subheader("Files")
+            file_browser(files)
 
     @classmethod
-    def load(cls, data_store: DataStore, address: Address) -> "Dataset":
+    def load(cls, data_store, address):
         """Load a dataset from the data store using its address."""
         sheet_name = "sheet"
         if data_store.has_sheet(address, sheet_name):
@@ -56,19 +57,20 @@ class Dataset(Entity):
             _data_store=data_store,
         )
 
-    def store(self, data_store: DataStore) -> None:
+    def store(self, data_store: DataStore):
         """Store the dataset, including files and sample sheet, in the data store."""
         data_store.clean(self.address)
         data_store.store_desc(self.address, self.desc)
-        data_store.store_sheet(self.address, self.sheet, "sheet")
-        for file in self.data_files:
+        if self.sheet is not None:
+            data_store.store_sheet(self.address, self.sheet, "sheet")
+        for file in self.data_files if self.data_files is not None else []:
             data_store.store_file(
                 self.address,
                 file,
                 file.name,
                 file_type=FileType.DATA,
             )
-        for file in self.meta_files:
+        for file in self.meta_files if self.meta_files is not None else []:
             data_store.store_file(
                 self.address,
                 file,
@@ -76,6 +78,8 @@ class Dataset(Entity):
                 file_type=FileType.META,
             )
 
-    def list_files(self, file_type: FileType) -> pl.DataFrame:
+    def list_files(self, file_type: FileType):
         """List files of a specific type (DATA or META) in the data store."""
+        if self._data_store is None:
+            raise ValueError("Data store is not set for this dataset.")
         return self._data_store.list_files(self.address, file_type=file_type)

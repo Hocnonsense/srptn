@@ -1,12 +1,13 @@
 import polars as pl
 import streamlit as st
+from streamlit.delta_generator import DeltaGenerator
 from streamlit.runtime.uploaded_file_manager import UploadedFile
 from streamlit_ace import THEMES, st_ace
 
-from srptn.common.components.schemas import infer_schema, update_schema
-from srptn.common.components.ui_components import toggle_button
-from srptn.common.data.entities.analysis import WorkflowManager
-from srptn.common.utils.polars_utils import (
+from .schemas import infer_schema, update_schema
+from .ui_components import toggle_button
+from ..data.entities.analysis import WorkflowManager
+from ..utils.polars_utils import (
     enforce_typing,
     get_type_specific_default,
     load_data_table,
@@ -14,13 +15,14 @@ from srptn.common.utils.polars_utils import (
 )
 
 
-def add_column(key: str) -> None:
+def add_column(key: str):
     """Add a new column to the dataframe.
 
     :param key: The key for the Streamlit session state.
     """
 
-    def add(data: pl.DataFrame, column: str) -> None:
+    def add(column: str):
+        data: pl.DataFrame = st.session_state[f"{key}-data"]
         if column.strip() and column not in data.columns:
             st.session_state[f"{key}-data"] = data.with_columns(
                 pl.Series(column, [""] * len(data)),
@@ -32,20 +34,18 @@ def add_column(key: str) -> None:
             "Add",
             key=f"{key}-add_column_button",
             on_click=add,
-            args=(
-                st.session_state[f"{key}-data"],
-                column,
-            ),
+            args=(column,),
         )
 
 
-def clear_data(key: str) -> None:
+def clear_data(key: str):
     """Clear all rows of the dataframe.
 
     :param key: The key for the Streamlit session state.
     """
 
-    def clear(data: pl.DataFrame) -> None:
+    def clear():
+        data: pl.DataFrame = st.session_state[f"{key}-data"]
         st.session_state[f"{key}-data"] = pl.DataFrame(schema=data.schema)
 
     st.button(
@@ -54,17 +54,16 @@ def clear_data(key: str) -> None:
         help="Clear all entries",
         key=f"{key}-clear_data_button",
         on_click=clear,
-        args=(st.session_state[f"{key}-data"],),
     )
 
 
-def custom_upload(key: str) -> None:
+def custom_upload(key: str):
     """Upload a custom configuration file and replace the dataframe.
 
     :param key: The key for the Streamlit session state.
     """
 
-    def upload(uploaded_file: UploadedFile) -> None:
+    def upload(uploaded_file: UploadedFile):
         st.session_state[f"{key}-data"] = load_data_table(
             uploaded_file,
             source="upload",
@@ -84,14 +83,13 @@ def custom_upload(key: str) -> None:
         )
 
 
-def data_editor(key: str) -> None:
+def data_editor(key: str):
     """Provide an interface for editing a dataframe with various options.
 
     :param key: The key for the Streamlit session state.
     """
-    col1, col2, col3, col4, col5, col6 = st.session_state[f"{key}-placeholders"][
-        0
-    ].columns(6)
+    holders: list[DeltaGenerator] = st.session_state[f"{key}-placeholders"]
+    col1, col2, col3, col4, col5, col6 = holders[0].columns(6)
     with col1:
         add_column(key)
     with col2:
@@ -105,8 +103,8 @@ def data_editor(key: str) -> None:
     with col6:
         clear_data(key)
     process_user_code(key)
-    dataset_ids = list(st.session_state.get("workflow-meta-datasets-sheets"))
-    st.session_state[f"{key}-placeholders"][2].data_editor(
+    dataset_ids = list(st.session_state.get("workflow-meta-datasets-sheets", {}))
+    holders[2].data_editor(
         st.session_state[f"{key}-data"],
         use_container_width=True,
         num_rows="dynamic",
@@ -121,7 +119,10 @@ def data_editor(key: str) -> None:
             ),
         },
     )
-    validate_data(key, st.session_state[f"{key}-data"])
+    validate_data(key)
+    # FIXME: use a long table with: (id), datasetid, filename, *meta
+    # to select sample from it. Define global indexes, use a list of
+    # pivot rules to make wide table, and merge them to the final one
 
 
 def generate_from_to_fields(
@@ -130,7 +131,7 @@ def generate_from_to_fields(
     to_col: str,
     key: str,
     data_selected: pl.DataFrame,
-) -> tuple[str]:
+):
     """Generate UI for selecting 'From' and 'To' column pairs."""
     cols = st.columns([3, 3, 1])
     with cols[0]:
@@ -142,9 +143,11 @@ def generate_from_to_fields(
         from_col_val = st.selectbox(
             "From",
             options=data_selected.columns,
-            index=data_selected.columns.index(from_col)
-            if from_col in data_selected.columns
-            else 0,
+            index=(
+                data_selected.columns.index(from_col)
+                if from_col in data_selected.columns
+                else 0
+            ),
             key=f"{key}-fill_column_select-{idx}",
             label_visibility="collapsed",
         )
@@ -165,22 +168,23 @@ def generate_from_to_fields(
     return from_col_val, to_col_val
 
 
-def add_new_from_to_field(key: str, data_selected: pl.DataFrame) -> None:
+def add_new_from_to_field(key: str, data_selected: pl.DataFrame):
     """Add a new 'From-To' field pair to the session state."""
-    next_idx = st.session_state[f"{key}-next_col_idx"]
+    next_idx = st.session_state[f"{key}-next_col_idx"] % len(data_selected.columns)
     next_col = data_selected.columns[next_idx]
     st.session_state[f"{key}-fill_pairs"].append((next_col, next_col))
     st.session_state[f"{key}-next_col_idx"] = (next_idx + 1) % len(
-        data_selected.columns,
+        data_selected.columns
     )
 
 
-def prepare_fill_pairs(key: str, data_selected: pl.DataFrame) -> None:
+def prepare_fill_pairs(key: str, data_selected: pl.DataFrame):
     """Initialize the 'fill_pairs' and related session state variables."""
     if f"{key}-fill_pairs" not in st.session_state:
         default_col = data_selected.columns[0]
         st.session_state[f"{key}-fill_pairs"] = [(default_col, default_col)]
         st.session_state[f"{key}-next_col_idx"] = 1
+    return st.session_state[f"{key}-fill_pairs"]
 
 
 def validate_and_cast_columns(
@@ -188,7 +192,7 @@ def validate_and_cast_columns(
     data_modified: pl.DataFrame,
     from_col: str,
     to_col: str,
-) -> pl.DataFrame:
+):
     """Validate and cast columns as necessary."""
     column_to_add = data_selected.select(pl.col(from_col).alias(to_col))
     if to_col in data_modified.columns:
@@ -196,24 +200,15 @@ def validate_and_cast_columns(
             st.warning(f"Column '{to_col}' has a different type")
             try:
                 column_to_add = column_to_add.cast(data_modified.schema[to_col])
-            except pl.InvalidOperationError:
+            except pl.exceptions.InvalidOperationError:
                 st.error(
                     f"Failed to cast column '{from_col}' to match the existing '{to_col}' type",
                 )
                 st.stop()
-    else:
-        col_type = data_selected[from_col].dtype
-        default_value = get_type_specific_default(col_type)
-        new_column = pl.Series(
-            to_col,
-            [default_value] * len(data_modified),
-            dtype=col_type,
-        )
-        data_modified = data_modified.with_columns(new_column)
     return column_to_add
 
 
-def data_fill(key: str) -> None:
+def data_fill(key: str):
     """Fill the configuration file with data from a selected dataset."""
     with st.popover("", icon=":material/library_add:"):
         selected = None
@@ -225,12 +220,11 @@ def data_fill(key: str) -> None:
                     options=list(dataset),
                     key=f"{key}-fill_data_select",
                 )
-        if selected:
+        if selected and dataset is not None:
             data_selected = dataset[selected]
-            data_modified = st.session_state[f"{key}-data"].clone()
+            data_modified: pl.DataFrame = st.session_state[f"{key}-data"].clone()
 
-            prepare_fill_pairs(key, data_selected)
-            fill_pairs = st.session_state[f"{key}-fill_pairs"]
+            fill_pairs = prepare_fill_pairs(key, data_selected)
 
             for i, (from_col, to_col) in enumerate(fill_pairs):
                 fill_pairs[i] = generate_from_to_fields(
@@ -248,7 +242,7 @@ def data_fill(key: str) -> None:
                 icon=":material/add:",
             )
 
-            columns_to_add = []
+            columns_to_add: list[pl.DataFrame] = []
             for from_col, to_col in fill_pairs:
                 column_to_add = validate_and_cast_columns(
                     data_selected,
@@ -281,7 +275,7 @@ def data_selector(
     value: str,
     key: str,
     workflow_manager: WorkflowManager,
-) -> tuple[str, bool]:
+):
     """Create a data selector widget in Streamlit.
 
     :param label: The label for the text input widget.
@@ -307,7 +301,7 @@ def data_selector(
     if (
         data_key not in st.session_state
         or data_key_changed not in st.session_state
-        or st.session_state.get(data_key_changed) != input_value
+        or st.session_state[data_key_changed] != input_value
     ):
         if data_schema_key in st.session_state:
             st.session_state.pop(data_schema_key)
@@ -319,7 +313,7 @@ def data_selector(
         st.session_state[data_key_changed] = input_value
 
     if not isinstance(st.session_state[data_key], pl.DataFrame):
-        st.error(f"File {value.split('/')[-1]} not found!")
+        # st.error reported in load_data_table
         return input_value, False
     st.session_state[data_key] = st.session_state[data_key].with_columns(
         datasetid=pl.lit(""),
@@ -339,17 +333,18 @@ def data_selector(
         )
 
     with col2:
-        show_data = toggle_button("", key, icon=":material/keyboard_arrow_down:")
+        show_data: bool = toggle_button("", key, icon=":material/keyboard_arrow_down:")
     return input_value, show_data
 
 
-def delete_column(key: str) -> None:
+def delete_column(key: str):
     """Delete a column from the dataframe.
 
     :param key: The key for the Streamlit session state.
     """
 
-    def delete(data: pl.DataFrame, selected: str) -> None:
+    def delete(selected: str):
+        data: pl.DataFrame = st.session_state[f"{key}-data"]
         st.session_state[f"{key}-data"] = data.drop(selected)
 
     with st.popover("", icon=":material/remove:", help="Remove a column"):
@@ -362,19 +357,15 @@ def delete_column(key: str) -> None:
             "Delete",
             key=f"{key}-delete_column_button",
             on_click=delete,
-            args=(
-                st.session_state[f"{key}-data"],
-                selected,
-            ),
+            args=(selected,),
         )
 
 
 def execute_custom_code(
-    data: pl.DataFrame,
+    data,
     key: str,
     user_code: str,
-    mode: str,
-) -> pl.DataFrame | None:
+):
     """Execute custom code provided by the user on the dataframe.
 
     :param data: The dataframe on which the custom code will be executed.
@@ -382,19 +373,23 @@ def execute_custom_code(
     :param mode: The mode to determine whether the result should be applied or returned.
     :return: The dataframe after the custom code has been executed, or None if mode is 'apply'.
     """
+    if not isinstance(data, pl.DataFrame):
+        st.error("The provided data is not a Polars DataFrame.")
+        return
     user_code = "import polars as pl\nimport numpy as np\n" + user_code
     local_vars = {}
     for k, value in [
         (k, value)
         for k, value in st.session_state.items()
         if (
-            k.startswith("workflow-config-")
+            isinstance(k, str)
+            and k.startswith("workflow-config-")
             and k.endswith("-data")
             and isinstance(value, pl.DataFrame)
             and f"{key}-data" != k
         )
     ]:
-        local_var_key = k.split("-")[2].split(".")[-1]
+        local_var_key = k[16:-5].split(".")[-1]
         local_vars[local_var_key] = value
 
     local_vars["df"] = data
@@ -402,13 +397,11 @@ def execute_custom_code(
     data = local_vars.get("df", data)
     if not isinstance(data, pl.DataFrame):
         st.error("The returned object is not a Polars DataFrame.")
-    if mode == "apply":
-        st.session_state[f"{key}-data"] = data
-        return None
-    return data
+    else:
+        return data
 
 
-def modify_schema(schema: dict, key: str) -> dict:
+def modify_schema(schema: dict, key: str):
     """Rename a column in the dataframe schema.
 
     :param schema: The data schema.
@@ -427,7 +420,7 @@ def modify_schema(schema: dict, key: str) -> dict:
             key=f"{key}-modify_column_text",
         )
         rename = st.button("Rename", key=f"{key}-modify_column_button")
-        if rename and renamed.strip():
+        if rename and (renamed or "").strip():
             schema["properties"][renamed] = schema["properties"].pop(selected)
             if selected in schema["required"]:
                 schema["required"] = [
@@ -436,7 +429,7 @@ def modify_schema(schema: dict, key: str) -> dict:
     return schema
 
 
-def process_user_code(key: str) -> None:
+def process_user_code(key: str):
     """Modify the dataframe using user-provided Python code.
 
     :param key: The key for the Streamlit session state that identifies the data.
@@ -445,7 +438,10 @@ def process_user_code(key: str) -> None:
         "Advanced table modification",
         expanded=True,
     ):
-        acestring = "# The table is available as df: pl.DataFrame\n# All other tables are accessible through their file name\n"
+        acestring = (
+            "# The table is available as df: pl.DataFrame\n"
+            "# All other tables are accessible through their file name\n"
+        )
 
         c1, c2 = st.columns([3.25, 1])
         with c1:
@@ -472,7 +468,7 @@ def process_user_code(key: str) -> None:
         no_import = True
         if "import " in user_code:
             for line in user_code.splitlines():
-                if line.strip().startswith("import"):
+                if line.strip().startswith("import "):
                     no_import = False
                     st.error("Remove line with 'import' as no imports are allowed.")
                     break
@@ -486,24 +482,30 @@ def process_user_code(key: str) -> None:
                 help="Preview the changes",
             )
         with col2:
+
+            def set_refresh(key, user_code):
+                st.session_state[f"{key}-data"] = execute_custom_code(
+                    st.session_state[f"{key}-data"],
+                    key,
+                    user_code,
+                )
+
             st.button(
                 "",
                 key=f"{key}-advanced_manipulation_apply_config",
                 disabled=not no_import,
                 icon=":material/publish:",
                 help="Apply the changes",
-                on_click=execute_custom_code,
+                on_click=set_refresh,
                 args=(
-                    st.session_state[f"{key}-data"],
                     key,
                     user_code,
-                    "apply",
                 ),
             )
         if preview:
             preview_data = st.session_state[f"{key}-data"].clone()
             # returned again as preview_data does not need to be placed in session state
-            preview_data = execute_custom_code(preview_data, key, user_code, "preview")
+            preview_data = execute_custom_code(preview_data, key, user_code)
             st.dataframe(
                 preview_data,
                 use_container_width=True,
@@ -512,13 +514,14 @@ def process_user_code(key: str) -> None:
             validate_data(key, preview_data)
 
 
-def rename_column(key: str) -> None:
+def rename_column(key: str):
     """Rename a column in the dataframe.
 
     :param key: The key for the Streamlit session state that identifies the data.
     """
 
-    def rename(data: pl.DataFrame, selected: str, renamed: str) -> None:
+    def rename(selected: str, renamed: str):
+        data: pl.DataFrame = st.session_state[f"{key}-data"]
         if rename and renamed.strip():
             st.session_state[f"{key}-data"] = data.rename({selected: renamed})
 
@@ -538,14 +541,13 @@ def rename_column(key: str) -> None:
             key=f"{key}-rename_column_button",
             on_click=rename,
             args=(
-                st.session_state[f"{key}-data"],
                 selected,
                 renamed,
             ),
         )
 
 
-def update_data(key: str) -> None:
+def update_data(key: str):
     """Update the data in the session state based on user edits.
 
     :param key: The key for the Streamlit session state that identifies the data.
@@ -561,20 +563,19 @@ def update_data(key: str) -> None:
         st.warning("No edits detected in the data editor.")
 
 
-def validate_data(key: str, data: pl.DataFrame | None = None) -> None:
+def validate_data(key: str, data: pl.DataFrame | None = None):
     """Validate a dataset against its associated schema.
 
     :param key: The key for the Streamlit session state identifying the dataset and schema.
     :param data: The dataset to be validated. If not provided, it will be fetched from the Streamlit session state.
     """
-    st.session_state["workflow-config-form-valid"][key] = True
 
     # Fetch data and schema if not provided
-    if not isinstance(data, pl.DataFrame):
-        data = st.session_state.get(f"{key}-data")
     if data is None:
-        st.error(f"No data found for key: {key}")
-        return
+        data = st.session_state.get(f"{key}-data")
+        if data is None:
+            st.error(f"No data found for key: {key}")
+            return
 
     data_dict = data.to_dict(as_series=False)
     schema = st.session_state.get(f"{key}-schema")
@@ -585,9 +586,11 @@ def validate_data(key: str, data: pl.DataFrame | None = None) -> None:
     required_fields = schema.get("required", [])
     properties = schema.get("properties", {})
 
+    st.session_state["workflow-config-form-valid"][key] = True
     for field, field_info in properties.items():
         column_data = data_dict.get(field)
-        if field in required_fields and not column_data:
+        is_required = field in required_fields
+        if is_required and not column_data:
             report_missing_required_field(key, field)
             continue
 
@@ -597,11 +600,11 @@ def validate_data(key: str, data: pl.DataFrame | None = None) -> None:
                 field,
                 column_data,
                 field_info,
-                is_required=(field in required_fields),
+                is_required=is_required,
             )
 
 
-def report_missing_required_field(key: str, field: str) -> None:
+def report_missing_required_field(key: str, field: str):
     """Report a missing required field.
 
     :param key: The key for the Streamlit session state identifying the dataset.
@@ -618,7 +621,7 @@ def validate_column_data(
     field_info: dict,
     *,
     is_required: bool,
-) -> None:
+):
     """Validate a single column against its schema definition.
 
     :param key: The key for the Streamlit session state identifying the dataset.
@@ -628,7 +631,7 @@ def validate_column_data(
     :param is_required: Whether the field is marked as required.
     """
 
-    def is_value_valid(value: any, expected_type: str) -> bool:
+    def is_value_valid(value, expected_type: str):
         match expected_type:
             case "boolean":
                 return str(value).lower() in {"true", "false", "0", "1"}

@@ -1,9 +1,9 @@
 import streamlit as st
 
-from srptn.common.components.ui_components import persistent_text_area
+from .ui_components import persistent_text_area
 
 
-def desc_editor(key: str) -> str:
+def desc_editor(key: str):
     """Edit and preview a text description in Markdown format.
 
     :param key: A string prefix to uniquely identify session state keys for descriptions.

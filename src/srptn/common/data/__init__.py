@@ -3,13 +3,19 @@ import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
+from typing import Self, BinaryIO, TypeVar
+from pathlib import Path
 
 import polars as pl
 
 
 @dataclass
 class Address:
-    """Represents an address composed of owner, entity type, categories, and name."""
+    """
+    Represents an address composed of owner, entity type, categories, and name.
+
+    Identify a workdir of a workflow
+    """
 
     owner: str
     entity_type: type["Entity"]
@@ -17,28 +23,28 @@ class Address:
     name: str
 
     @classmethod
-    def from_str(cls, value: str) -> "Address":
+    def from_str(cls, value: str):
         """Parse an address from a string."""
-        from common.data.entities import _entity_types
+        from .entities import _entity_types
 
         owner, entity, *categories, name = value.split("/")
         entity = _entity_types[entity]
         return cls(owner=owner, entity_type=entity, categories=categories, name=name)
 
     @classmethod
-    def from_filename(cls, filename: str) -> "Address":
+    def from_filename(cls, filename: str):
         """Parse an address from a filename."""
         if not filename or "___" not in filename:
             raise ValueError("Invalid filename format")
         return cls.from_str(re.sub(r"___", "/", filename))
 
-    def to_filename(self) -> str:
+    def to_filename(self):
         """Convert the address to a filename-safe format."""
         if "/" not in str(self):
             raise ValueError("Invalid address format")
         return re.sub(r"/", "___", str(self))
 
-    def __str__(self) -> str:
+    def __str__(self):
         """Return the address as a formatted string."""
         return f"{self.owner}/{self.entity_type.__name__.lower()}/{'/'.join(self.categories)}/{self.name}"
 
@@ -50,7 +56,7 @@ class Entity(ABC):
     address: Address
     desc: str
 
-    def __post_init__(self) -> "Entity":
+    def __post_init__(self):
         """Validate the entity type against the address."""
         if self.address.entity_type != self.__class__:
             raise ValueError(f"Address type must be '{self.__class__.__name__}'")
@@ -62,16 +68,17 @@ class Entity(ABC):
 
     @classmethod
     @abstractmethod
-    def load(cls, data_store: "DataStore", address: Address) -> None:
+    def load(cls, data_store: "DataStore", address: Address) -> Self:
         """Abstract method to load an entity from a data store."""
-        ...
 
-    def __str__(self) -> str:
+    def __str__(self):
         """Return the string representation of the entity."""
         return str(self.address)
 
-    def __eq__(self, other: "Entity") -> bool:
+    def __eq__(self, other):
         """Check equality based on class and address."""
+        if not isinstance(other, Entity):
+            raise NotImplementedError("Cannot compare Entity with non-Entity type")
         return self.__class__ == other.__class__ and self.address == other.address
 
 
@@ -80,6 +87,9 @@ class FileType(Enum):
 
     DATA = "data"
     META = "meta"
+
+
+E = TypeVar("E", bound=Entity)
 
 
 @dataclass(slots=True)
@@ -112,7 +122,7 @@ class DataStore(ABC):
         address: Address,
         file_path: str,
         file_type: FileType,
-    ) -> io.IOBase:
+    ) -> BinaryIO:
         """Abstract method to load a file from the data store."""
         ...
 
@@ -160,14 +170,19 @@ class DataStore(ABC):
     @abstractmethod
     def entities(
         self,
-        entity_type: type[Entity],
+        entity_type: type[E],
         search_term: str | None = None,
         only_owned_by: str | None = None,
-    ) -> list[Entity]:
+    ) -> list[E]:
         """Abstract method to fetch entities from the data store."""
         ...
 
     @abstractmethod
-    def has_entity(self, address: Address) -> None:
+    def has_entity(self, address: Address) -> bool:
         """Abstract method to check if an Entity exists in the data store."""
+        ...
+
+    @abstractmethod
+    def files_path(self, address: Address, file_type: FileType) -> Path:
+        """Abstract method to get the path for files of a specific type."""
         ...

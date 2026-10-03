@@ -27,6 +27,7 @@ srptn = { path = ".", editable = true }
 
 [tool.pixi.dependencies]
 tmux = ">=3.5,<4"
+pip = ">=26.1.2,<27"
 
 [tool.pixi.feature.dev]
 pypi-dependencies = {pytest = "*", ruff = "*", pyright = "*"}

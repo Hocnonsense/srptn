@@ -1,3 +1,4 @@
+# FIXME: use jsonschema instead
 import re
 from math import isnan
 
@@ -5,7 +6,7 @@ import polars as pl
 import streamlit as st
 
 
-def get_nonan_index(value: pl.Series | list) -> int | None:
+def get_nonan_index(value: pl.Series | list):
     """Find the index of the first non-NaN value in the list.
 
     :param value: A list of values to search for the first non-NaN value.
@@ -13,7 +14,7 @@ def get_nonan_index(value: pl.Series | list) -> int | None:
     are NaN.
     """
 
-    def isna(value: any) -> bool:
+    def isna(value):
         return not value or (isinstance(value, float) and isnan(value))
 
     for idx, v in enumerate(value):
@@ -22,7 +23,7 @@ def get_nonan_index(value: pl.Series | list) -> int | None:
     return None
 
 
-def get_property_type(schema: dict) -> str | None:
+def get_property_type(schema: dict):
     """Determine the property type key in a schema dictionary.
 
     :param schema: A dictionary representing the schema.
@@ -69,17 +70,17 @@ def infer_type(value: pl.Series | list | bool | float | str | None) -> dict:
             idx = get_nonan_index(value)
             value_schema = {
                 "type": "array",
-                "items": infer_type(value[idx])
-                if idx is not None
-                else {"type": "missing"},
+                "items": (
+                    infer_type(value[idx]) if idx is not None else {"type": "missing"}
+                ),
             }
         case value if isinstance(value, list):
             idx = get_nonan_index(value)
             value_schema = {
                 "type": "array",
-                "items": infer_type(value[idx])
-                if idx is not None
-                else {"type": "missing"},
+                "items": (
+                    infer_type(value[idx]) if idx is not None else {"type": "missing"}
+                ),
             }
         case bool(value):
             value_schema = {"type": "boolean"}

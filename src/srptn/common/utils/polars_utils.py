@@ -26,7 +26,7 @@ def enforce_typing(data: pl.DataFrame, schema: dict) -> pl.DataFrame:
             data = data.with_columns(pl.col(field).cast(field_type))
             padding_value = get_type_specific_default(data[field].dtype)
             data = data.with_columns(pl.col(field).fill_null(padding_value))
-        except pl.InvalidOperationError:
+        except pl.exceptions.InvalidOperationError:
             st.error(
                 f"Failed to translate column '{field}' to match type '{field_type}'",
             )
@@ -34,7 +34,7 @@ def enforce_typing(data: pl.DataFrame, schema: dict) -> pl.DataFrame:
     return data
 
 
-def get_type_specific_default(dtype: pl.datatypes.DataType) -> str | float | int | None:
+def get_type_specific_default(dtype: pl.DataType):
     """Return the appropriate padding value based on the column's data type.
 
     :param dtype: The Polars data type of the column.
@@ -53,10 +53,7 @@ def get_type_specific_default(dtype: pl.datatypes.DataType) -> str | float | int
     return None
 
 
-def load_data_table(
-    file: UploadedFile | Path,
-    source: str = "file",
-) -> pl.DataFrame | None:
+def load_data_table(file: UploadedFile | Path, source: str = "file"):
     """Load a data table from an uploaded file or a file path based on the source.
 
     :param file: The uploaded file or file path to load the data from.
@@ -67,7 +64,7 @@ def load_data_table(
     :raises StreamlitError: For unsupported file formats or missing files.
     """
 
-    def read_data(file: UploadedFile | Path, file_type: str) -> pl.DataFrame | None:
+    def read_data(file: UploadedFile | Path, file_type: str):
         if file_type in ["text/tab-separated-values", ".tsv"]:
             return pl.read_csv(file, separator="\t")
         if file_type in ["text/csv", ".csv"]:
@@ -84,7 +81,7 @@ def load_data_table(
         st.stop()
         return None
 
-    file_type = file.type if source == "upload" else file.suffix
+    file_type = file.type if source == "upload" else file.suffix  # type: ignore[reportAttributeAccessIssue]
     if source == "upload":
         return read_data(file, file_type)
     try:
@@ -95,10 +92,8 @@ def load_data_table(
 
 
 def merge_dataframes(
-    data_modified: pl.DataFrame,
-    columns_to_add: pl.DataFrame,
-    selected: str,
-) -> pl.DataFrame:
+    data_modified: pl.DataFrame, columns_to_add: list[pl.DataFrame], selected: str
+):
     """Merge new columns into the existing dataframe and return the updated dataframe."""
     columns_to_add_combined = pl.concat(columns_to_add, how="horizontal").with_columns(
         pl.lit(selected, dtype=pl.String).alias("datasetid"),
@@ -120,7 +115,7 @@ def merge_dataframes(
     return pl.concat([data_modified, columns_to_add_combined], how="vertical")
 
 
-def save_data_table(data: pl.DataFrame, path: Path) -> None:
+def save_data_table(data: pl.DataFrame, path: Path):
     """Save a data table to a file based on the file extension.
 
     :param data: The Polars DataFrame to save.
@@ -132,17 +127,18 @@ def save_data_table(data: pl.DataFrame, path: Path) -> None:
     """
     file_extension = path.suffix
     try:
-        if file_extension == ".tsv":
-            data.write_csv(path, separator="\t")
-        elif file_extension == ".csv":
-            data.write_csv(path)
-        elif file_extension == ".xlsx":
-            data.write_excel(path)
-        else:
-            raise ValueError(
-                f"""Unsupported file format: {file_extension}.
-                 Supported formats are: TSV, CSV, XLSX""",
-            )
+        match file_extension:
+            case ".tsv":
+                data.write_csv(path, separator="\t")
+            case ".csv":
+                data.write_csv(path)
+            case ".xlsx":
+                data.write_excel(path)
+            case _:
+                raise ValueError(
+                    f"""Unsupported file format: {file_extension}.
+                    Supported formats are: TSV, CSV, XLSX""",
+                )
     except OSError as os_error:
         raise OSError(
             f"File writing failed due to an I/O error: {os_error}",

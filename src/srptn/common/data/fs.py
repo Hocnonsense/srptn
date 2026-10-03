@@ -15,33 +15,29 @@ class FSDataStore(DataStore):
     base_data: Path = Path("datastore/data")
     base_meta: Path = Path("datastore/meta")
 
-    def clean(self, address: Address) -> None:
+    def clean(self, address):
         """Remove metadata and data files associated with the given address."""
+        # FIXME: should shutil.rmtree, or move to a temperary trash bin
         self.files_path(address, FileType.META).unlink(missing_ok=True)
         self.files_path(address, FileType.DATA).unlink(missing_ok=True)
 
-    def load_sheet(self, address: Address, sheet_name: str) -> pl.DataFrame:
+    def load_sheet(self, address, sheet_name):
         """Load a sample sheet as a Polars DataFrame from the given address."""
         return pl.read_parquet(self.sheet_path(address, sheet_name))
 
-    def has_sheet(self, address: Address, sheet_name: str) -> bool:
+    def has_sheet(self, address, sheet_name):
         """Check if a sample sheet exists for the given address and sheet name."""
         return self.sheet_path(address, sheet_name).exists()
 
-    def load_desc(self, address: Address) -> str:
+    def load_desc(self, address):
         """Load and returns the description text for the given address."""
         return self.desc_path(address).read_text()
 
-    def load_file(
-        self,
-        address: Address,
-        file_path: str,
-        file_type: FileType,
-    ) -> io.IOBase:
+    def load_file(self, address, file_path, file_type):
         """Load a file of a specific type from the given address."""
         return (self.files_path(address, file_type) / file_path).open("rb")
 
-    def has_file(self, address: Address, file_path: str, file_type: FileType) -> bool:
+    def has_file(self, address, file_path, file_type):
         """Check if a file exists for the given address, path, and file type."""
         return (self.files_path(address, file_type) / file_path).exists()
 
@@ -69,9 +65,9 @@ class FSDataStore(DataStore):
     ) -> None:
         """Store a file of a specific type at the given address."""
         folder = self.files_path(address, file_type)
-        file_path = folder / file_path
-        file_path.parent.mkdir(exist_ok=True, parents=True)
-        with (file_path).open("wb") as f:
+        file_path_ = folder / file_path
+        file_path_.parent.mkdir(exist_ok=True, parents=True)
+        with (file_path_).open("wb") as f:
             shutil.copyfileobj(file, f)
 
     def store_desc(self, address: Address, desc: str) -> None:
@@ -94,12 +90,7 @@ class FSDataStore(DataStore):
         except Exception as e:
             raise RuntimeError(f"Failed to write sheet to {sheet_path}: {e}") from e
 
-    def entities(
-        self,
-        entity_type: type[Entity],
-        search_term: str | None = None,
-        only_owned_by: str | None = None,
-    ) -> list[Entity]:
+    def entities(self, entity_type, search_term=None, only_owned_by=None):
         """Retrieve entities of a specific type, filtered by search term and owner."""
         addr = (
             Address.from_str(str(desc.parent.relative_to(self.base_meta)))
@@ -107,23 +98,17 @@ class FSDataStore(DataStore):
         )
         addr = [a for a in addr if a.entity_type == entity_type]
 
-        def take_all(_: any) -> bool:
-            return True
+        search_filter_func = owned_filter_func = lambda entity: True
 
-        if search_term:
+        if search_term:  # match the keyword
 
-            def search_filter_func(entity: Entity) -> bool:
+            def search_filter_func(entity: Entity):
                 return search_term in str(entity.address) or search_term in entity.desc
 
-        else:
-            search_filter_func = take_all
-        if only_owned_by:
+        if only_owned_by:  # safety
 
-            def owned_filter_func(entity: Entity) -> bool:
+            def owned_filter_func(entity: Entity):
                 return entity.address.owner == only_owned_by
-
-        else:
-            owned_filter_func = take_all
 
         return list(
             filter(
@@ -132,24 +117,24 @@ class FSDataStore(DataStore):
             ),
         )
 
-    def has_entity(self, address: Address) -> bool:
+    def has_entity(self, address):
         """Check if an entity exists for the given address."""
         return self.desc_path(address).exists()
 
     @staticmethod
-    def as_path(base: Path, address: Address) -> Path:
+    def as_path(base: Path, address: Address):
         """Convert a base path and address into a full path."""
         return base / str(address)
 
-    def desc_path(self, address: Address) -> Path:
+    def desc_path(self, address: Address):
         """Return the path to the description file for the given address."""
         return self.files_path(address, FileType.META) / "desc.md"
 
-    def sheet_path(self, address: Address, name: str) -> Path:
+    def sheet_path(self, address: Address, name: str):
         """Return the path to a sheet file for the given address and name."""
         return self.files_path(address, FileType.META) / f"{name}.parquet"
 
-    def files_path(self, address: Address, file_type: FileType) -> Path:
+    def files_path(self, address, file_type):
         """Return the path to the files directory for a given address and type."""
         return self.as_path(
             self.base_data if file_type == FileType.DATA else self.base_meta,

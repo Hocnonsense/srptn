@@ -1,14 +1,16 @@
 import streamlit as st
 
-from srptn.common.components.ui_components import persistent_multiselect
-from srptn.common.data import DataStore, Entity
+from srptn.common.data.entities.dataset import Dataset
+
+from .ui_components import persistent_multiselect
+from ..data import DataStore, Entity
 
 
 def entity_browser(
     data_store: DataStore,
     entity_type: type[Entity],
     owner: str,
-) -> None:
+):
     """Display a browser interface for searching and filtering entities.
 
     :param data_store: The data store containing entities to browse.
@@ -31,19 +33,14 @@ def entity_browser(
         st.warning(f"No {entity_type.__name__.lower()} found")
 
 
-def entity_selector(
-    data_store: DataStore,
-    entity_type: type[Entity],
-    key: str,
-) -> list[Entity]:
+def data_selector(data_store: DataStore, key: str):
     """Allow the user to select entities from a list.
 
     :param data_store: The data store containing entities to select.
-    :param entity_type: The type of entities to select.
     :param key: A unique key for storing selection state.
     :return: A list of selected entities.
     """
-    entities = data_store.entities(entity_type=entity_type)
+    entities = data_store.entities(entity_type=Dataset)
 
     if entities:
         names = [str(entity.address) for entity in entities]
@@ -57,5 +54,5 @@ def entity_selector(
             str(entity.address): entity.sheet for entity in entities
         }
         return entities
-    st.warning(f"No {entity_type.__name__.lower()} found")
+    st.warning(f"No Dataset found")
     return []

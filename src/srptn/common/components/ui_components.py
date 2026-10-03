@@ -1,12 +1,12 @@
 import streamlit as st
 
 
-def update(key: str) -> None:
+def update(key: str):
     """Update session state to facility persistent behavior."""
     st.session_state[f"{key}-value"] = st.session_state[key]
 
 
-def persistent_multiselect(label: str, names: list, key: str) -> list:
+def persistent_multiselect(label: str, names: list, key: str):
     """Create a multiselect widget in Streamlit that persists its selection state across page reloads.
 
     :param label: The label for the multiselect widget.
@@ -27,7 +27,7 @@ def persistent_multiselect(label: str, names: list, key: str) -> list:
     )
 
 
-def persistent_text_input(label: str, key: str, placeholder: str = "") -> str:
+def persistent_text_input(label: str, key: str, placeholder: str = ""):
     """Create a persistent text input widget in Streamlit.
 
     :param label: The label for the text input widget.
@@ -51,11 +51,8 @@ def persistent_text_input(label: str, key: str, placeholder: str = "") -> str:
 
 
 def persistent_text_area(
-    label: str,
-    key: str,
-    placeholder: str = "",
-    helpstr: str = "",
-) -> str:
+    label: str, key: str, placeholder: str = "", helpstr: str = ""
+):
     """Create a persistent text area widget in Streamlit.
 
     :param label: The label for the text area widget.
@@ -80,7 +77,11 @@ def persistent_text_area(
     return text if text else ""
 
 
-def toggle_button(label: str, key: str, icon: str | None = None) -> bool:
+def toggle(state: str):
+    st.session_state[state] = not st.session_state[state]
+
+
+def toggle_button(label: str, key: str, icon: str | None = None):
     """Create a toggle button in Streamlit.
 
     :param label: The label for the button.
@@ -88,9 +89,6 @@ def toggle_button(label: str, key: str, icon: str | None = None) -> bool:
     :param icon: An optional icon to display alongside the button.
     :return: The current toggle state (True or False).
     """
-
-    def toggle(state: str) -> None:
-        st.session_state[state] = not st.session_state[state]
 
     unique_key = f"{key}-{label.lower()}"
     state = f"{key}-state"

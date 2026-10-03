@@ -1,22 +1,16 @@
 import streamlit as st
 
-from srptn.common.components.config_editor import (
-    ace_config_editor,
-    config_editor,
-)
-from srptn.common.components.schemas import (
-    infer_schema,
-    update_schema,
-)
-from srptn.common.components.ui_components import persistent_text_input
-from srptn.common.data import Address, DataStore
-from srptn.common.data.entities.analysis import WorkflowManager
+from .config_editor import ace_config_editor, config_editor
+from .schemas import infer_schema, update_schema
+from .ui_components import persistent_text_input
+from ..data import Address, DataStore
+from ..data.entities.analysis import WorkflowManager
 
 
 def workflow_selector(
     address: Address,
     data_store: DataStore,
-) -> WorkflowManager | None:
+):
     """Create a workflow selector widget in Streamlit with persistent text inputs.
 
     :return: The selected workflow or None if the input is incomplete.
@@ -29,9 +23,14 @@ def workflow_selector(
         branch: str | None,
         *,
         refresh: bool,
-    ) -> WorkflowManager | None:
+    ):
+        # FIXME: ensure_workflow to avoid @st.cache_data
+        # If the workflow is already stored at data_store / address,
+        # then do not store again.
+        # TODO: what if the workflow exists with a different URL, tag, or branch
         if url and (tag or branch):
             for key in st.session_state:
+                key: str
                 if key.startswith("workflow-config-"):
                     del st.session_state[key]
             # old tempdir is deleted -> re-caching the workflow
@@ -40,15 +39,14 @@ def workflow_selector(
             workflow_manager = WorkflowManager(url, tag, branch, data_store, address)
             workflow_manager.store()
             return workflow_manager
-        st.info("Please provide a workflow URL and a tag or branch")
-        return None
+        st.info("Please provide a workflow URL with a tag or branch")
 
     url = persistent_text_input(
         "Workflow repository URL (e.g. https://github.com/snakemake-workflows/rna-seq-kallisto-sleuth)",
         "workflow-meta-url",
         "https://github.com/snakemake-workflows/rna-seq-kallisto-sleuth",
     )
-
+    # TODO: pre-load the url to enable the user to select tag/branch/commit
     tag = persistent_text_input(
         "Workflow repository tag (optional)",
         "workflow-meta-tag",
@@ -65,7 +63,7 @@ def workflow_selector(
     return get_workflow(url, tag, branch, refresh=st.session_state["workflow-refresh"])
 
 
-def workflow_editor(workflow_manager: WorkflowManager) -> None:
+def workflow_editor(workflow_manager: WorkflowManager):
     """Create and edit the configuration of a workflow.
 
     :param workflow: The workflow object containing URL, tag, and branch information.

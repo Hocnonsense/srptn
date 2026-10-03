@@ -9,7 +9,7 @@ def category_editor(key: str) -> list:
     new entries.
     """
 
-    def update_categories(position: int) -> None:
+    def update_categories(position: int):
         st.session_state[f"{key}-categories"][position] = st.session_state[
             f"{key}-category-{position}"
         ]
@@ -17,6 +17,8 @@ def category_editor(key: str) -> list:
             cat for cat in st.session_state[f"{key}-categories"] if cat
         ] + [""]
 
+    # FIXME: use st.session_state[f"{key}-categories"] = {position: cat}
+    # and st.session_state[f"{key}-category-next-position"] += 1 to avoid position shift
     if f"{key}-categories" not in st.session_state:
         st.session_state[f"{key}-categories"] = [""]
 

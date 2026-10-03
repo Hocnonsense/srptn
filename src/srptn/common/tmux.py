@@ -1,6 +1,7 @@
 from threading import Lock
 
 import libtmux
+import libtmux.exc
 import streamlit as st
 
 
@@ -12,14 +13,14 @@ class TmuxServer:
 
     @classmethod
     @st.cache_resource
-    def get_instance(cls) -> libtmux.Server:
+    def get_instance(cls):
         """Retrieve the singleton tmux server instance."""
         with cls._lock:
             if cls._instance is None:
                 cls._instance = libtmux.Server()
             return cls._instance
 
-    def clear_all(self) -> None:
+    def clear_all(self):
         """Kill all tmux sessions associated with the server instance."""
         if self._instance:
             for session in self._instance.sessions:
@@ -29,17 +30,14 @@ class TmuxServer:
 class TmuxSessionManager:
     """Handles tmux session lifecycle management."""
 
-    def __init__(self) -> None:
-        self.server = TmuxServer.get_instance()
+    def __init__(self):
+        self.server: libtmux.Server = TmuxServer.get_instance()
 
-    def get_session(self, session_name: str) -> libtmux.Session | None:
+    def get_session(self, session_name: str):
         """Retrieve a tmux session by name."""
-        return next(
-            (s for s in self.server.list_sessions() if s.name == session_name),
-            None,
-        )
+        return self.server.sessions.get(session_name=session_name, default=None)
 
-    def create_session(self, session_name: str) -> libtmux.Session:
+    def create_session(self, session_name: str):
         """Create a new tmux session."""
         return self.server.new_session(
             session_name=session_name,
@@ -48,17 +46,19 @@ class TmuxSessionManager:
             history_limit=10000,
         )
 
-    def close_session(self, session_name: str) -> None:
+    def close_session(self, session_name: str):
         """Close an existing tmux session."""
         session = self.get_session(session_name)
         if session:
             session.kill_session()
 
-    def capture_output(self, session_name: str) -> str | None:
+    def capture_output(self, session_name: str):
         """Capture pane output from a tmux session."""
         try:
             session = self.get_session(session_name)
             if not session:
+                return None
+            if not session.active_pane:
                 return None
             # Captures both stdout and stderr
             return "\n".join(session.active_pane.capture_pane(start=-10000))
