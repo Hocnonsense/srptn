@@ -1,6 +1,7 @@
 import io
 import fcntl
 import shutil
+import subprocess
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -18,6 +19,22 @@ class FSDataStore(DataStore):
     base_data: Path = Path("datastore/data")
     base_meta: Path = Path("datastore/meta")
     base_cache: Path = Path("datastore/cache")
+
+    def cached_workflows(self) -> dict[str, Path]:
+        repositories = {}
+        for git_dir in (self.base_cache / ".cache").glob("**/repo/.git"):
+            if not git_dir.is_dir():
+                continue
+            repo = git_dir.parent
+            result = subprocess.run(
+                ["git", "config", "--get", "remote.origin.url"],
+                cwd=repo,
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                repositories[result.stdout.strip()] = repo
+        return dict(sorted(repositories.items()))
 
     @contextmanager
     def _cache_lock(self):
@@ -190,7 +207,7 @@ class FSDataStore(DataStore):
         """Check if an entity exists for the given address,
         or if it is inside any of the data store's file types.
         """
-        if self.files_path(address, FileType.DATA).exists():
+        if self.desc_path(address).exists():
             return True
         for parent in self.files_path(address, FileType.META).parents:
             if (parent / "desc.md").exists():
