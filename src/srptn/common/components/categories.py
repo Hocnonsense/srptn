@@ -31,6 +31,7 @@ def category_editor(key: str):
             args=(position,),
             placeholder="Enter category/subcategory",
         )
+        or ""
         for position, cat in enumerate(st.session_state[f"{key}-categories"])
     ]
     return categories[:-1]
