@@ -6,7 +6,6 @@ from pathlib import Path
 import polars as pl
 import streamlit as st
 import yaml
-from snakedeploy.deploy import WorkflowDeployer
 
 from srptn.common.components.logs import log_selector
 from srptn.common.data import Address, DataStore, Entity, FileType
@@ -14,6 +13,7 @@ from srptn.common.data.entities.dataset import Dataset
 from srptn.common.tmux import TmuxSessionManager
 from srptn.common.utils.polars_utils import load_data_table, save_data_table
 from srptn.common.utils.yaml_utils import CustomSafeDumper, CustomSafeLoader
+from srptn.common.utils.snakedeploy import CachedWorkflowDeployer
 
 
 @dataclass
@@ -47,11 +47,12 @@ class WorkflowManager:
         self.data_store.clean(self.address)
         self.data_path.mkdir(parents=True, exist_ok=True)
         self.meta_path.mkdir(parents=True, exist_ok=True)
-        with WorkflowDeployer(
+        with CachedWorkflowDeployer(
             self.url,
             self.data_path,
             tag=self.tag,
             branch=self.branch,
+            cache=self.data_store.cache,
         ) as wd:
             wd.deploy(self.address.name)
             schema_path = Path(wd.repo_clone) / "workflow" / "schemas"
