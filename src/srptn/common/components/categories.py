@@ -44,7 +44,11 @@ def check_path(categories: list[str]):
     if any(cat.startswith("/") for cat in categories):
         st.error("Categories cannot start with slashes")
         st.stop()
-    if {".", ".."} & set("/".join(categories).split("/")):
+    category = "/".join(categories)
+    if "\\" in category:
+        st.error("Categories cannot contain backslashes")
+        st.stop()
+    if {".", ".."} & set(category.split("/")):
         st.error("Invalid '.' and '..' used in category")
         # TODO: put such user in the black list for warning
         st.stop()
