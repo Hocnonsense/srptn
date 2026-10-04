@@ -13,7 +13,7 @@ from srptn.common.data.entities.dataset import Dataset
 from srptn.common.tmux import TmuxSessionManager
 from srptn.common.utils.polars_utils import load_data_table, save_data_table
 from srptn.common.utils.yaml_utils import CustomSafeDumper, CustomSafeLoader
-from srptn.common.utils.snakedeploy import CachedWorkflowDeployer
+from srptn.common.utils.snakedeploy import CachedWorkflowManager
 
 
 @dataclass
@@ -25,6 +25,7 @@ class WorkflowManager:
     branch: str | None
     data_store: DataStore
     address: Address
+    commit: str | None = None
 
     @classmethod
     def load(cls, data_store: DataStore, address: Address):
@@ -36,6 +37,7 @@ class WorkflowManager:
             url=details["url"],
             tag=details["tag"],
             branch=details["branch"],
+            commit=details["commit"],
             data_store=data_store,
             address=address,
         )
@@ -47,12 +49,10 @@ class WorkflowManager:
         self.data_store.clean(self.address)
         self.data_path.mkdir(parents=True, exist_ok=True)
         self.meta_path.mkdir(parents=True, exist_ok=True)
-        with CachedWorkflowDeployer(
+        with CachedWorkflowManager(self.data_store).deployer(
             self.url,
             self.data_path,
-            tag=self.tag,
-            branch=self.branch,
-            cache=self.data_store.cache,
+            commit=self.commit,
         ) as wd:
             wd.deploy(self.address.name)
             schema_path = Path(wd.repo_clone) / "workflow" / "schemas"
@@ -61,8 +61,6 @@ class WorkflowManager:
                     schema_path,
                     self.schema_dir,
                 )
-            # TODO: store commit hash, tag (or None), branch (or None)
-            # to avoid re-deploying
         self.check()
         self.export_metadata()
 
@@ -132,6 +130,7 @@ class WorkflowManager:
             "url": self.url,
             "tag": self.tag,
             "branch": self.branch,
+            "commit": self.commit,
         }
         with (self.meta_path / "details.yml").open("w") as f:
             yaml.safe_dump(details, f)

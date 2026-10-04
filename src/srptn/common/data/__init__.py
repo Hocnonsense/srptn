@@ -1,10 +1,11 @@
 import io
 import re
 from abc import ABC, abstractmethod
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Self, BinaryIO, TypeVar
+from typing import Callable, Iterable, Self, BinaryIO, TypeVar
 from pathlib import Path
 
 import polars as pl
@@ -91,20 +92,34 @@ class FileType(Enum):
 
 
 E = TypeVar("E", bound=Entity)
+T = TypeVar("T")
 
 
 @dataclass(slots=True)
 class DataStore(ABC):
     """Abstract base class for data stores."""
 
-    def cache(
-        self, address: Address | str, timestamp: datetime | None = None, replace=False
-    ) -> Path:
-        """Return cache space, optionally replacing it with entity data/meta.
+    @abstractmethod
+    def cache_entries(
+        self, owner: str | None = None, filter: Callable[[Path], T | None] = lambda x: x
+    ) -> Iterable[tuple[T, datetime]]:
+        """List undated cache entry directories without refreshing their timestamps."""
+        ...
 
-        Without a timestamp, refresh the cache's last-access marker.
+    @abstractmethod
+    def cache_access(
+        self, address: Address | str, timestamp: datetime | None = None, replace=False
+    ) -> AbstractContextManager[Path]:
+        """Create or locate a cache entry and exclusively use it until context exit.
+
+        Cleanup must skip active entries and replacement must refuse them.
+        Access fails immediately when a required lock is busy; never wait or retry.
+        Replacement of an Address also moves its entity data/meta into the entry.
+        Undated entries expire by last access; dated entries expire by timestamp.
+        Refresh the access marker on entry and exit, including failed uses.
+        The returned path is protected only for the duration of this context.
         """
-        raise NotImplementedError()
+        ...
 
     def clean_cache(self, before: timedelta) -> None:
         """Delete expired cache branches; before is their maximum age."""

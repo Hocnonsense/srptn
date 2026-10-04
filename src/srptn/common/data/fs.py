@@ -1,8 +1,7 @@
 import io
 import fcntl
 import shutil
-import subprocess
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,47 +19,66 @@ class FSDataStore(DataStore):
     base_meta: Path = Path("datastore/meta")
     base_cache: Path = Path("datastore/cache")
 
-    def cached_workflows(self) -> dict[str, Path]:
-        repositories = {}
-        for git_dir in (self.base_cache / ".cache").glob("**/repo/.git"):
-            if not git_dir.is_dir():
-                continue
-            repo = git_dir.parent
-            result = subprocess.run(
-                ["git", "config", "--get", "remote.origin.url"],
-                cwd=repo,
-                capture_output=True,
-                text=True,
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                repositories[result.stdout.strip()] = repo
-        return dict(sorted(repositories.items()))
+    def cache_entries(self, owner=None, filter=lambda x: x):
+        if owner is not None:
+            base = self.base_cache / f"private/.cache/{owner}"
+            for marker in base.glob("**/.timestamp"):
+                address = filter(marker.parent)
+                if address is not None:
+                    yield address, datetime.fromtimestamp(marker.stat().st_mtime)
+        base = self.base_cache / "public/.cache"
+        for marker in base.glob("**/.timestamp"):
+            address = filter(marker.parent)
+            if address is not None:
+                yield address, datetime.fromtimestamp(marker.stat().st_mtime)
 
     @contextmanager
     def _cache_lock(self):
         self.base_cache.mkdir(parents=True, exist_ok=True)
         with (self.base_cache / ".lock").open("a") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             yield
 
-    def cache(self, address, timestamp=None, replace=False):
-        prefix = ".cache" if timestamp is None else str(timestamp)
+    def _cache(self, address, timestamp=None, replace=False):
+        prefix = "private/" if isinstance(address, Address) else "public/"
+        prefix += ".cache" if timestamp is None else f"{timestamp}"
         cache = self.as_path(self.base_cache, f"{prefix}/{address}")
-        with self._cache_lock():
+        with self._cache_lock(), ExitStack() as locks:
             if replace:
+                if cache.is_dir() and not cache.is_symlink():
+                    # A replacement must also respect active nested entries.
+                    for marker in sorted(cache.rglob(".timestamp")):
+                        if marker.is_file() and not marker.is_symlink():
+                            lock = locks.enter_context(marker.open("a"))
+                            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 if cache.is_symlink() or cache.is_file():
                     cache.unlink()
                 elif cache.exists():
                     shutil.rmtree(cache)
             cache.mkdir(parents=True, exist_ok=True)
-            if replace and isinstance(address, Address):
-                for file_type in (FileType.DATA, FileType.META):
-                    source = self.files_path(address, file_type)
-                    if source.exists() or source.is_symlink():
-                        shutil.move(str(source), str(cache / file_type.value))
-        if timestamp is None:
-            (cache / ".timestamp").touch()
-        return cache
+            marker = cache / ".timestamp"
+            marker.touch()
+            lock = marker.open("a")
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                if replace and isinstance(address, Address):
+                    for file_type in (FileType.DATA, FileType.META):
+                        source = self.files_path(address, file_type)
+                        if source.exists() or source.is_symlink():
+                            shutil.move(str(source), str(cache / file_type.value))
+            except BaseException:
+                lock.close()
+                raise
+        return cache, lock
+
+    @contextmanager
+    def cache_access(self, address, timestamp=None, replace=False):
+        entry, lock = self._cache(address, timestamp, replace)
+        with lock:
+            try:
+                yield entry
+            finally:
+                Path(lock.name).touch()
 
     def clean_cache(self, before):
         current = datetime.now(timezone.utc)
@@ -68,8 +86,9 @@ class FSDataStore(DataStore):
             raise ValueError("Cache expiry must be positive")
         cutoff = (current - before).timestamp()
 
-        def prune(branch):
+        def prune(branch: Path, dated=False):
             if branch.is_symlink() or not branch.is_dir():
+                # weird link exists without .timestamp, remove it
                 branch.unlink()
                 return False
             marker = branch / ".timestamp"
@@ -79,33 +98,41 @@ class FSDataStore(DataStore):
                         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
                     except BlockingIOError:
                         return True
-                    if marker.stat().st_mtime >= cutoff:
+                    if not dated and marker.stat().st_mtime >= cutoff:
                         return True
+                    return prune_children(branch, dated)
+            return prune_children(branch, dated)
+
+        def prune_children(branch: Path, dated):
             retained = False
             for child in list(branch.iterdir()):
                 if child.name != ".timestamp":
-                    retained = prune(child) or retained
+                    retained |= prune(child, dated)
             if not retained:
                 shutil.rmtree(branch)
             return retained
 
         with self._cache_lock():
-            for entry in self.base_cache.iterdir():
-                if entry.name == ".cache":
-                    prune(entry)
-                elif entry.is_dir() and not entry.is_symlink():
-                    try:
-                        timestamp = datetime.fromisoformat(entry.name)
-                    except ValueError:
-                        continue
-                    if timestamp.tzinfo is None:
-                        timestamp = timestamp.replace(tzinfo=timezone.utc)
-                    if current - timestamp > before:
-                        shutil.rmtree(entry)
+            for prefix in ("private", "public"):
+                if not (self.base_cache / prefix).is_dir():
+                    continue
+                for entry in (self.base_cache / prefix).iterdir():
+                    if entry.name == ".cache":
+                        prune(entry)
+                    elif entry.is_dir() and not entry.is_symlink():
+                        try:
+                            timestamp = datetime.fromisoformat(entry.name)
+                        except ValueError:
+                            continue
+                        if timestamp.tzinfo is None:
+                            timestamp = timestamp.replace(tzinfo=timezone.utc)
+                        if current - timestamp > before:
+                            prune(entry, dated=True)
 
     def clean(self, address):
         """Move metadata and data into cache for external garbage collection."""
-        self.cache(address, datetime.now(timezone.utc), replace=True)
+        with self.cache_access(address, datetime.now(timezone.utc), replace=True):
+            pass
 
     def load_sheet(self, address, sheet_name):
         """Load a sample sheet as a Polars DataFrame from the given address."""
@@ -203,10 +230,13 @@ class FSDataStore(DataStore):
             ),
         )
 
-    def occupied(self, address):
+    def occupied(self, address, only_check_meta=False):
         """Check if an entity exists for the given address,
         or if it is inside any of the data store's file types.
         """
+        if not only_check_meta:
+            if self.desc_path(address).exists():
+                return True
         if self.files_path(address, FileType.DATA).exists():
             return True
         for parent in self.files_path(address, FileType.META).parents:

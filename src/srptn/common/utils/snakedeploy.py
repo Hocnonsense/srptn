@@ -1,13 +1,18 @@
 """Reuse repository downloads while deploying from isolated temporary copies."""
 
-from collections.abc import Callable
-import fcntl
-from pathlib import Path
+import hashlib
 import subprocess
+import tarfile
 import tempfile
+from contextlib import ExitStack, contextmanager
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import NamedTuple
 
 from snakedeploy.deploy import WorkflowDeployer
-from snakedeploy.providers import Local
+from snakedeploy.providers import Local, Provider, get_provider
+
+from ..data import DataStore
 
 
 def _git(repo: Path, *args: str):
@@ -16,78 +21,224 @@ def _git(repo: Path, *args: str):
     ).stdout.strip()
 
 
-def _default_branch(repo: Path):
-    return _git(repo, "symbolic-ref", "refs/remotes/origin/HEAD").removeprefix(
-        "refs/remotes/origin/"
+def get_git_url(path: Path):
+    """Inspect cached origin configuration without renewing its timestamp."""
+    repo = path / "repo"
+    if not (repo / ".git").is_dir():
+        return None
+    try:
+        return _git(repo, "config", "--get", "remote.origin.url")
+    except subprocess.CalledProcessError:
+        return None
+
+
+def hash_url(url: str):
+    """Generate a hash for a given URL."""
+    return hashlib.sha256(url.encode()).hexdigest()
+
+
+def git_refresh(repo: Path, url: str):
+    _git(repo, "remote", "set-url", "origin", url)
+    _git(
+        repo,
+        "fetch",
+        "--filter=tree:0",
+        "--no-recurse-submodules",
+        "--prune",
+        "origin",
+        "+refs/heads/*:refs/remotes/origin/*",
+        "+refs/tags/*:refs/tags/*",
     )
+    _git(repo, "remote", "set-head", "origin", "--auto")
 
 
-class CachedWorkflowDeployer(WorkflowDeployer):
-    """Cache by source URL; leave cache timestamps and expiry to the callback."""
-
-    def __init__(
-        self,
-        source: str,
-        dest: Path,
-        tag: str | None = None,
-        branch: str | None = None,
-        force: bool = False,
-        *,
-        cache: Callable[[str], Path] | None = None,
-    ):
-        super().__init__(source, dest, tag=tag, branch=branch, force=force)
-        self.cache = cache
-        self._cache_path: Path | None = None
-
-    def __exit__(self, exc, value, tb):
-        if self._cloned is not None:
-            self._cloned.cleanup()
-            self._cloned = None
+class RepoRefs(NamedTuple):
+    commits: dict[str, tuple[str, datetime]]  # sha -> (subject, commit datetime)
+    tags: dict[str, str]  # tag name -> sha
+    branches: dict[str, str]  # branch name -> sha
+    head: str
 
     @property
-    def repo_clone(self):
-        if (
-            self._cloned is not None
-            or isinstance(self.provider, Local)
-            or self.cache is None
-        ):
-            return super().repo_clone
-        try:
-            self._cache_path = self.cache(self.provider.source_url)
-        except Exception:
-            return super().repo_clone
-        self._cache_path.mkdir(parents=True, exist_ok=True)
-        # Serialize repository updates and snapshots, independently of cache expiry.
-        repo = self._cache_path / "repo"
-        with (self._cache_path / ".repo.lock").open("a") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
-            provider = self.provider
-            if not (repo / ".git").is_dir():
-                provider.clone(repo)
-            else:
-                _git(repo, "remote", "set-url", "origin", provider.source_url)
-                _git(
-                    repo,
-                    "fetch",
-                    "--prune",
-                    "--tags",
-                    "origin",
-                    "+refs/heads/*:refs/remotes/origin/*",
-                )
-            if self.tag is not None:
-                provider.checkout(str(repo), f"refs/tags/{self.tag}")
-            else:
-                branch = self.branch or _default_branch(repo)
-                _git(repo, "checkout", "-B", branch, f"origin/{branch}")
-            name = None
+    def default_commit(self) -> str:
+        """Prefer the newest tagged commit, then the newest commit."""
+        if self.tags:
+            return next(iter(self.tags.values()))
+        if self.commits:
+            return next(iter(self.commits))
+        raise ValueError("This Git repository contains no commits")
+
+    @classmethod
+    def from_repo(cls, repo: Path, *, remote: bool = False):
+        """Read refs and commit history locally, without accessing trees or blobs."""
+
+        def refs(prefix: str):
+            items: list[tuple[str, str]] = []
+            out = _git(
+                repo,
+                "for-each-ref",
+                "--format=%(refname)%09%(objectname)%09%(*objectname)",
+                prefix,
+            )
+            for line in out.splitlines():
+                name, _, objects = line.partition("\t")
+                objectname, _, deref = objects.partition("\t")
+                if name.endswith("/HEAD"):
+                    continue
+                sha = deref or objectname
+                items.append((name.removeprefix(prefix + "/"), sha))
+            items.sort(key=lambda item: order.get(item[1], len(order)))
+            return dict(items)
+
+        commits: dict[str, tuple[str, datetime]] = {}
+        for line in _git(
+            repo, "log", "--topo-order", "--all", "HEAD", "--format=%H%x09%ct%x09%s"
+        ).splitlines():
+            sha, date, subject = line.split("\t", 2)
+            commits[sha] = (
+                subject,
+                datetime.fromtimestamp(int(date), tz=timezone.utc),
+            )
+        commits = dict(
+            sorted(commits.items(), key=lambda item: item[1][1], reverse=True)
+        )
+        order = {sha: index for index, sha in enumerate(commits)}
+        if remote:
+            branchref = "refs/remotes/origin"
+        else:
+            branchref = "refs/heads"
+        return cls(
+            commits,
+            refs("refs/tags"),
+            refs("refs/remotes/origin" if remote else branchref),
+            _git(repo, "rev-parse", "HEAD^{commit}"),
+        )
+
+
+def export_commit(
+    repo: Path,
+    commit: str,
+    dest: str,
+    *,
+    require_clean: bool = True,
+):
+    """Export a resolved commit without .git and return its full SHA."""
+    repo = repo.resolve()
+
+    if _git(repo, "rev-parse", "--is-bare-repository") == "true":
+        top = Path(_git(repo, "rev-parse", "--absolute-git-dir")).resolve()
+    else:
+        if require_clean:
+            dirty = _git(repo, "status", "--porcelain")
+            if dirty:
+                raise RuntimeError(f"{repo} is not a clean git repository:\n{dirty}")
+        top = Path(_git(repo, "rev-parse", "--show-toplevel")).resolve()
+    if top != repo:
+        raise RuntimeError(f"{repo} is not a git repository (found {top})")
+
+    sha = _git(repo, "rev-parse", "--verify", commit + "^{commit}")
+    proc = subprocess.Popen(
+        ["git", "-C", str(repo), "archive", "--format=tar", sha],
+        stdout=subprocess.PIPE,
+    )
+    try:
+        with tarfile.open(fileobj=proc.stdout, mode="r|") as tar:
+            tar.extractall(dest, filter="data")
+    finally:
+        if proc.stdout:
+            proc.stdout.close()
+        proc.wait()
+    if proc.returncode != 0:
+        raise subprocess.CalledProcessError(proc.returncode, proc.args)
+    return sha
+
+
+class CachedWorkflowManager:
+    """Own repository caching, synchronization, version queries and deployment."""
+
+    def __init__(self, data_store: DataStore):
+        self.data_store = data_store
+
+    def available_workflows(self):
+        # TODO: local urls
+        for url, time in self.data_store.cache_entries(filter=get_git_url):
+            yield url
+
+    @contextmanager
+    def _cached_repository(self, provider: Provider):
+        with ExitStack() as stack:
             try:
-                self.provider = Local(str(repo))
-                name = super().repo_clone
-            finally:
-                self.provider = provider
-                if name is None:
-                    if self._cloned is not None:
-                        self._cloned.cleanup()
-                        self._cloned = None
-                    name = super().repo_clone
-        return name
+                entry = stack.enter_context(
+                    self.data_store.cache_access(hash_url(provider.source_url))
+                )
+            except (FileNotFoundError, BlockingIOError):
+                entry = Path(stack.enter_context(tempfile.TemporaryDirectory()))
+
+            repo = entry / "repo"
+            if not (repo / ".git").is_dir():
+                with tempfile.TemporaryDirectory(dir=entry) as staging:
+                    _git(
+                        entry,
+                        "clone",
+                        "--filter=tree:0",
+                        "--no-checkout",
+                        "--no-local",
+                        provider.source_url,
+                        staging,
+                    )
+                    git_refresh(Path(staging), provider.source_url)
+                    Path(staging).rename(repo)
+            yield repo
+
+    def read_workflow_refs(self, url: str, *, refresh: bool = False):
+        """Read Git's cached history; synchronize explicitly without file objects."""
+        provider: Provider = get_provider(url)
+        if isinstance(provider, Local):
+            repo = Path(url)
+            if (repo / ".git").exists():
+                return RepoRefs.from_repo(repo)
+            return None
+        with self._cached_repository(provider) as repo:
+            if refresh:
+                git_refresh(repo, provider.source_url)
+            return RepoRefs.from_repo(repo, remote=True)
+
+    def resolve_ref(self, url: str, *, tag=None, branch=None):
+        """Resolve a named ref against the cached versions without refreshing."""
+        refs = self.read_workflow_refs(url)
+        if refs is None:
+            raise ValueError(f"Workflow {url} is not a Git repository")
+        if tag is not None:
+            if tag in refs.tags:
+                return refs.tags[tag]
+            raise ValueError(f"Unknown workflow ref: {tag}")
+        elif branch is not None:
+            if branch in refs.branches:
+                return refs.branches[branch]
+            raise ValueError(f"Unknown workflow ref: {branch}")
+        raise ValueError("Either tag or branch must be specified for ref resolution")
+
+    def deployer(self, url: str, dest: Path, *, commit: str | None = None, force=False):
+        """Prepare one isolated clone and let snakedeploy use it directly."""
+        deployer = WorkflowDeployer(url, dest, force=force)
+        provider = deployer.provider
+        if isinstance(provider, Local) and not (Path(url) / ".git").exists():
+            if commit is not None:
+                raise ValueError(f"Workflow {url} is not a Git repository")
+            return deployer
+        cloned = tempfile.TemporaryDirectory()
+        try:
+            if isinstance(provider, Local):
+                deployer.tag = export_commit(Path(url), commit or "HEAD", cloned.name)
+            else:
+                with self._cached_repository(provider) as cached:
+                    deployer.tag = export_commit(
+                        cached,
+                        commit or "refs/remotes/origin/HEAD",
+                        cloned.name,
+                        require_clean=False,
+                    )
+        except BaseException:
+            cloned.cleanup()
+            raise
+        deployer._cloned = cloned
+        return deployer

@@ -21,19 +21,23 @@ analysis_name = persistent_text_input(
     "Enter name",
 )
 
+render_continue = True
 address = Address(owner, Analysis, categories=categories, name=analysis_name)
-if data_store.occupied(address):
+if data_store.occupied(address, only_check_meta=True):
     st.error(f"Analysis {address} already exists")
-    st.stop()
+    render_continue = False
 
-desc = desc_editor("workflow-meta")
+if render_continue:
+    desc = desc_editor("workflow-meta")
 
-datasets = data_selector(data_store, "workflow-meta-datasets")
+    datasets = data_selector(data_store, "workflow-meta-datasets")
 
-if not categories or not analysis_name:
-    st.stop()
+    if not categories or not analysis_name:
+        render_continue = False
 
 workflow_manager = workflow_selector(address, data_store)
+if not render_continue:
+    st.stop()
 
 
 def store_analysis(
