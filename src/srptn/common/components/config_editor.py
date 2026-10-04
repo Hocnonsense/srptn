@@ -1,5 +1,4 @@
 import re
-from functools import reduce
 
 import streamlit as st
 import yaml

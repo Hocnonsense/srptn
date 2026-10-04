@@ -9,7 +9,6 @@ from .ui_components import toggle_button
 from ..data.entities.analysis import WorkflowManager
 from ..utils.polars_utils import (
     enforce_typing,
-    get_type_specific_default,
     load_data_table,
     merge_dataframes,
 )

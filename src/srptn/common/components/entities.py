@@ -54,5 +54,5 @@ def data_selector(data_store: DataStore, key: str):
             str(entity.address): entity.sheet for entity in entities
         }
         return entities
-    st.warning(f"No Dataset found")
+    st.warning("No Dataset found")
     return []
