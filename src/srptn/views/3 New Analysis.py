@@ -1,5 +1,6 @@
 import streamlit as st
 
+from srptn.common.accounts.session import require_actor
 from srptn.common.components.categories import category_editor
 from srptn.common.components.descriptions import desc_editor
 from srptn.common.components.entities import data_selector
@@ -10,7 +11,8 @@ from srptn.common.data.entities.analysis import Analysis, WorkflowManager
 from srptn.common.data.entities.dataset import Dataset
 from srptn.common.data.fs import FSDataStore
 
-owner = "koesterlab"
+actor = require_actor()
+owner = actor.user_id
 data_store = FSDataStore()
 
 categories = category_editor("workflow-meta")

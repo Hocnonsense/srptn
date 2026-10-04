@@ -2,6 +2,7 @@ import polars as pl
 import polars.selectors as cs
 import streamlit as st
 
+from srptn.common.accounts.session import require_actor
 from srptn.common.components.categories import category_editor
 from srptn.common.components.descriptions import desc_editor
 from srptn.common.data import Address
@@ -9,7 +10,8 @@ from srptn.common.data.entities.dataset import Dataset
 from srptn.common.data.fs import FSDataStore
 from srptn.common.utils.polars_utils import load_data_table
 
-owner = "koesterlab"
+actor = require_actor()
+owner = actor.user_id
 data_store = FSDataStore()
 
 categories = category_editor("new_dataset-meta")
