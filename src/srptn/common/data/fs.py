@@ -207,7 +207,7 @@ class FSDataStore(DataStore):
         """Check if an entity exists for the given address,
         or if it is inside any of the data store's file types.
         """
-        if self.desc_path(address).exists():
+        if self.files_path(address, FileType.DATA).exists():
             return True
         for parent in self.files_path(address, FileType.META).parents:
             if (parent / "desc.md").exists():
