@@ -15,12 +15,12 @@ class ManageAccountRepository(AccountRepository):
         session: Session,
         status: AccountStatus,
         *,
-        operator_id: str,
+        operator_address: str,
     ):
         """Set the account status, bump ``version`` and log the change.
 
         ``session`` identifies the account (and the version it was read at);
-        ``operator_id`` is the maintainer performing the change.
+        ``operator_address`` is the maintainer performing the change.
         """
         with self._database.transaction() as conn:
             self._check_version(conn, session)
@@ -28,7 +28,7 @@ class ManageAccountRepository(AccountRepository):
                 "UPDATE users SET status = ?, version = version + 1 WHERE id = ?",
                 (status.value, session.id),
             )
-            self._log(conn, f"set_status_{status.value}", operator_id, session.id)
+            self._log(conn, f"set_status_{status.value}", operator_address, session.id)
         return self._account(session.id)
 
     def set_role(
@@ -36,7 +36,7 @@ class ManageAccountRepository(AccountRepository):
         session: Session,
         role: Role,
         *,
-        operator_id: str,
+        operator_address: str,
     ):
         """Set the account role, bump ``version`` and log the change."""
         with self._database.transaction() as conn:
@@ -45,7 +45,7 @@ class ManageAccountRepository(AccountRepository):
                 "UPDATE users SET role = ?, version = version + 1 WHERE id = ?",
                 (role.label, session.id),
             )
-            self._log(conn, f"set_role_{role.label}", operator_id, session.id)
+            self._log(conn, f"set_role_{role.label}", operator_address, session.id)
         return self._account(session.id)
 
     def list_accounts(self):
@@ -65,7 +65,7 @@ class ManageAccountRepository(AccountRepository):
         """Return the audit events recorded for ``target_id``, oldest first."""
         with self._database.connection() as conn:
             rows = conn.execute(
-                "SELECT level, action, operator_id, target_id, created_at "
+                "SELECT level, action, operator_address, target_id, created_at "
                 "FROM account_events WHERE target_id = ? ORDER BY event_id",
                 (target_id,),
             ).fetchall()
@@ -73,7 +73,7 @@ class ManageAccountRepository(AccountRepository):
             AccountEvent(
                 level=EventLevel(row["level"]),
                 action=row["action"],
-                operator_id=row["operator_id"],
+                operator_address=row["operator_address"],
                 target_id=row["target_id"],
                 created_at=row["created_at"],
             )

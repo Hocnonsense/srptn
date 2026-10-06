@@ -24,16 +24,16 @@ class ManageAccountService(AccountService):
         repository = ManageAccountRepository.load(database_path)
         return cls(repository, hasher=hasher)
 
-    def set_status(self, id: str, status: AccountStatus, *, operator_id: str):
+    def set_status(self, id: str, status: AccountStatus, *, operator_address: str):
         return self._repository.set_status(
-            self._target_session(id), status, operator_id=operator_id
+            self._target_session(id), status, operator_address=operator_address
         )
 
-    def set_role(self, id: str, role: Role, *, operator_id: str):
+    def set_role(self, id: str, role: Role, *, operator_address: str):
         return self._repository.set_role(
             self._target_session(id),
             role,
-            operator_id=operator_id,
+            operator_address=operator_address,
         )
 
     def account(self, id: str):
@@ -67,7 +67,7 @@ class ManageAccountService(AccountService):
         if not events:
             lines.append("  (no events)")
         for event in events:
-            operator = event.operator_id or "-"
+            operator = event.operator_address or "-"
             lines.append(
                 f"  {event.created_at}  {event.level.value:7} "
                 f"{event.action}  (operator: {operator})"

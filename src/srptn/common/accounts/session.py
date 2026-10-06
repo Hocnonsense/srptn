@@ -31,6 +31,31 @@ def account_service(database_path: str | None = None):
     return _services[path]
 
 
+def client_ip():
+    """The client IP from the proxy's ``X-Forwarded-For`` (first hop).
+
+    ``X-Forwarded-For`` may list several hops; the first entry is the
+    originating client.  Returns ``None`` when the header is absent.  This is
+    audit information only: the header can be spoofed and must not be used
+    for authorization.
+    """
+    forwarded = st.context.headers.get("X-Forwarded-For")
+    if not forwarded:
+        return None
+    return forwarded.split(",")[0].strip()
+
+
+def _revoke():
+    """End the session and clear all business/UI state.
+
+    Clearing everything (not just the session keys) matters: otherwise a
+    later login in the same browser session can see the previous account's
+    drafts and workflow configuration.
+    """
+    st.session_state.clear()
+    st.session_state[_REVOKED_KEY] = True
+
+
 def logout():
     """End the session and clear all account drafts and UI state."""
     st.session_state.clear()
@@ -40,16 +65,14 @@ def current_account(service: AccountService):
     """Return the session's account, re-validating it against the database.
 
     A missing account, a disabled account or a ``version`` mismatch
-    (password/role change or disable) ends the session.
+    (password/role change or disable) ends the session and clears all state.
     """
     session = current_session()
     if session is None:
         return None
     account = service.get_account(session.id)
     if account is None or not account.is_active or account.version != session.version:
-        st.session_state.pop(_SESSION_KEY, None)
-        st.session_state.pop(_ACTOR_KEY, None)
-        st.session_state[_REVOKED_KEY] = True
+        _revoke()
         return None
     st.session_state[_ACTOR_KEY] = account.actor()
     return account
@@ -78,7 +101,9 @@ def login_form(service: AccountService):
     if not submitted:
         return
     try:
-        account = service.verify_credentials(id_, password)
+        account = service.verify_credentials(
+            id_, password, operator_address=client_ip()
+        )
     except Account.InvalidCredentials:
         st.error("ID or password is incorrect")
     except Account.OnHold:
@@ -110,7 +135,7 @@ def register_form(service: AccountService):
         st.error("Passwords do not match")
         return
     try:
-        service.register(id_, password)
+        service.register(id_, password, operator_address=client_ip())
     except Account.Occupied:
         st.error("This ID is already taken")
         return
@@ -137,9 +162,9 @@ def change_password_form(service: AccountService, session: Session):
         return
     try:
         account = service.change_password(session, current, new)
-    except Account.NotFound:
-        logout()
-        st.session_state[_REVOKED_KEY] = True
+    except (Account.NotFound, Account.EditConflict):
+        # The account is gone or was changed elsewhere; the session is stale.
+        _revoke()
         st.rerun()
     except ValueError as exc:
         st.error(str(exc))

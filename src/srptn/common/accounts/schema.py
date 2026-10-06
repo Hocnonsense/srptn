@@ -26,7 +26,7 @@ SCHEMA = [
         level       TEXT NOT NULL DEFAULT 'info'
                     CHECK (level IN ('success', 'info', 'warning', 'danger')),
         action      TEXT NOT NULL,
-        operator_id TEXT,
+        operator_address TEXT,
         target_id   TEXT NOT NULL,
         created_at  TEXT NOT NULL
     )
@@ -40,7 +40,7 @@ EXPECTED_COLUMNS = {
         "event_id",
         "level",
         "action",
-        "operator_id",
+        "operator_address",
         "target_id",
         "created_at",
     ],

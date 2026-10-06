@@ -91,6 +91,6 @@ class AccountEvent(NamedTuple):
 
     level: EventLevel
     action: str
-    operator_id: str | None
+    operator_address: str | None
     target_id: str
     created_at: str

@@ -53,7 +53,7 @@ class AccountRepository:
         password_hash: str,
         role: Role,
         *,
-        operator_id: str,
+        operator_address: str | None,
     ):
         """Insert a new on-hold account and record its registration event."""
         with self._database.transaction() as conn:
@@ -68,7 +68,7 @@ class AccountRepository:
                 )
             except sqlite3.IntegrityError as exc:
                 raise Account.Occupied(f"Account id {id!r} is taken") from exc
-            self._log(conn, "registered", operator_id, id)
+            self._log(conn, "registered", operator_address, id)
         return self._account(id)
 
     def set_password_hash(
@@ -76,10 +76,10 @@ class AccountRepository:
         session: Session,
         password_hash: str,
         *,
-        operator_id: str | None = None,
+        operator_address: str | None = None,
     ):
         """Replace the password hash, bump ``version`` and log the change."""
-        operator_id = operator_id or session.id
+        operator_address = operator_address or session.id
         with self._database.transaction() as conn:
             self._check_version(conn, session)
             conn.execute(
@@ -87,13 +87,13 @@ class AccountRepository:
                 "WHERE id = ?",
                 (password_hash, session.id),
             )
-            self._log(conn, "password_changed", operator_id, session.id)
+            self._log(conn, "password_changed", operator_address, session.id)
         return self._account(session.id)
 
     def log(
         self,
         action: str,
-        actor_id: str | None,
+        operator_address: str | None,
         target_id: str,
         level: EventLevel = EventLevel.INFO,
     ):
@@ -103,7 +103,7 @@ class AccountRepository:
         conveys its severity.
         """
         with self._database.transaction() as conn:
-            self._log(conn, action, actor_id, target_id, level)
+            self._log(conn, action, operator_address, target_id, level)
 
     def _check_version(
         self,
@@ -129,13 +129,13 @@ class AccountRepository:
     def _log(
         conn: sqlite3.Connection,
         action: str,
-        actor_id: str | None,
+        operator_address: str | None,
         target_id: str,
         level=EventLevel.INFO,
     ):
         conn.execute(
             "INSERT INTO account_events ("
-            "level, action, operator_id, target_id, created_at) "
+            "level, action, operator_address, target_id, created_at) "
             "VALUES (?, ?, ?, ?, ?)",
-            (level.value, action, actor_id, target_id, utcnow()),
+            (level.value, action, operator_address, target_id, utcnow()),
         )

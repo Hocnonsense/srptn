@@ -18,10 +18,7 @@ from ..common.accounts.policy import Role
 
 from .service import ManageAccountService
 
-
-def server_name():
-    """The server name recorded as the default operator for manage actions."""
-    return socket.gethostname()
+server_name = socket.gethostname()
 
 
 def _build_parser():
@@ -35,8 +32,8 @@ def _build_parser():
     )
     parser.add_argument(
         "--operator",
-        default=server_name(),
-        help="operator id for the audit log (defaults to the server name)",
+        default="",
+        help="operator address for the audit log (defaults to the server name)",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -60,17 +57,16 @@ def _build_parser():
 
 def _run(args):
     service = ManageAccountService.open(args.database)
+    operator = (args.operator + "@" if args.operator else "") + server_name
     try:
         if args.command == "set-status":
             account = service.set_status(
-                args.id, status=AccountStatus(args.status), operator_id=args.operator
+                args.id, status=AccountStatus(args.status), operator_address=operator
             )
             print(f"Status set: {account.describe()}")
         elif args.command == "set-role":
             account = service.set_role(
-                args.id,
-                Role.from_label(args.role),
-                operator_id=args.operator,
+                args.id, Role.from_label(args.role), operator_address=operator
             )
             print(f"Role set: {account.describe()}")
         elif args.command == "stat":

@@ -57,33 +57,44 @@ class AccountService:
         self._hasher = hasher or BcryptPasswordHasher()
         self._dummy_hash: str | None = None
 
-    def verify_credentials(self, id: str, password: str):
+    def verify_credentials(
+        self,
+        id: str,
+        password: str,
+        *,
+        operator_address: str | None = None,
+    ):
         """Return the account for valid credentials of an active account.
 
-        Unknown ids still run a dummy hash comparison so timing does not leak
-        account existence.  Raises :class:`Account.InvalidCredentials` for an unknown
-        id or wrong password and :class:`Account.OnHold` for a non-active one.
+        ``operator_address`` records where the attempt came from (the client IP in
+        the web layer); the attempted id is always the event target, so an
+        unknown id is still captured.  Unknown ids run a dummy hash comparison
+        so timing does not leak account existence.  Raises
+        :class:`Account.InvalidCredentials` for an unknown id or wrong password
+        and :class:`Account.OnHold` for a non-active one.
         """
         normalized = normalize_id(id)
         result = self._repository.get(normalized)
         if result is None:
             self._hasher.verify(password, self._dummy())
-            self._repository.log("login_unknown_id", None, id, EventLevel.WARNING)
+            self._repository.log(
+                "login_unknown_id", operator_address, id, EventLevel.WARNING
+            )
             raise Account.InvalidCredentials("Invalid id or password")
         account, password_hash = result
         if not self._hasher.verify(password, password_hash):
             self._repository.log(
-                "login_wrong_password", account.id, account.id, EventLevel.WARNING
+                "login_wrong_password", operator_address, account.id, EventLevel.WARNING
             )
             raise Account.InvalidCredentials("Invalid id or password")
         if not account.is_active:
             self._repository.log(
-                "login_account_onhold", account.id, account.id, EventLevel.WARNING
+                "login_account_onhold", operator_address, account.id, EventLevel.WARNING
             )
             raise Account.OnHold("Account is on hold, please contact an administrator")
         self._repository.log(
             "login_succeeded",
-            account.id,
+            operator_address,
             account.id,
             EventLevel.SUCCESS,
         )
@@ -135,13 +146,23 @@ class AccountService:
             session, self._hasher.hash(new_password)
         )
 
-    def register(self, id: str, password: str):
-        """Self-register an on-hold account.  A maintainer must approve it."""
+    def register(
+        self,
+        id: str,
+        password: str,
+        *,
+        operator_address: str | None = None,
+    ):
+        """Self-register an on-hold account.  A maintainer must approve it.
+
+        ``operator_address`` is the origin of the request (the client IP in the
+        web layer); the new account id is recorded separately as the target.
+        """
         normalized = normalize_id(id)
         validate_password(password)
         return self._repository.create(
             normalized,
             self._hasher.hash(password),
             Role.VISITOR,
-            operator_id=normalized,
+            operator_address=operator_address,
         )
