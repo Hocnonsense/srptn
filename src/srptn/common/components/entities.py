@@ -1,5 +1,6 @@
 import streamlit as st
 
+from srptn.common.accounts.policy import Actor
 from srptn.common.data.entities.dataset import Dataset
 
 from .ui_components import persistent_multiselect
@@ -9,13 +10,13 @@ from ..data import DataStore, Entity
 def entity_browser(
     data_store: DataStore,
     entity_type: type[Entity],
-    owner: str,
+    actor: Actor,
 ):
     """Display a browser interface for searching and filtering entities.
 
     :param data_store: The data store containing entities to browse.
     :param entity_type: The type of entities to browse.
-    :param owner: The owner of the entities.
+    :param actor: The authenticated actor; ``actor.id`` owns the entities.
     """
     search_term = st.text_input("Search")
     only_owned = st.checkbox("only owned")
@@ -23,7 +24,7 @@ def entity_browser(
     entities = data_store.entities(
         entity_type=entity_type,
         search_term=search_term,
-        only_owned_by=owner if only_owned else None,
+        only_owned_by=actor.id if only_owned else None,
     )
 
     if entities:

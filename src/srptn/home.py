@@ -1,5 +1,6 @@
 import streamlit as st
 
+from srptn.common.accounts.policy import Role
 from srptn.common.accounts.session import (
     account_service,
     change_password_form,
@@ -41,20 +42,25 @@ else:
             st.error("Your session has ended. Please log in again.")
             logout()
             st.stop()
-        st.caption(f"Hello, {actor.role.value} {actor.id}!")
+        st.caption(f"Hello, {actor.role.label} {actor.id}!")
         change_password_form(service, session)
         if st.button("Logout", use_container_width=True):
             logout()
             st.rerun()
 
+    entries = [
+        ("views/1 New Dataset.py", "New Dataset", Role.HOST),
+        ("views/2 Datasets.py", "Datasets", Role.VISITOR),
+        ("views/3 New Analysis.py", "New Analysis", Role.HOST),
+        ("views/4 Analyses.py", "Analyses", Role.VISITOR),
+        ("views/5 Notebook (Mockup).py", "Notebook (Mockup)", Role.VISITOR),
+        ("views/6 Compose Figure (Mockup).py", "Compose Figure (Mockup)", Role.VISITOR),
+        (account_page, "Account", None),
+    ]
     navigation = [
-        st.Page("views/1 New Dataset.py", title="New Dataset"),
-        st.Page("views/2 Datasets.py", title="Datasets"),
-        st.Page("views/3 New Analysis.py", title="New Analysis"),
-        st.Page("views/4 Analyses.py", title="Analyses"),
-        st.Page("views/5 Notebook (Mockup).py", title="Notebook (Mockup)"),
-        st.Page("views/6 Compose Figure (Mockup).py", title="Compose Figure (Mockup)"),
-        st.Page(account_page, title="Account"),
+        st.Page(page, title=title)
+        for page, title, role in entries
+        if actor.role.permitted(role)
     ]
 
 st.navigation(navigation).run()

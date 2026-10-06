@@ -52,13 +52,11 @@ class ManageAccountService(AccountService):
         return self.account(id).session()
 
     def ls(self, status: str | None, role: str | None):
-        status = AccountStatus(status) if status else None
-        role = Role(role) if role else None
         accounts = self._repository.list_accounts()
         if status is not None:
-            accounts = accounts.filter(pl.col("status") == status.value)
+            accounts = accounts.filter(pl.col("status") == AccountStatus(status).value)
         if role is not None:
-            accounts = accounts.filter(pl.col("role") == role.value)
+            accounts = accounts.filter(pl.col("role") == Role.from_label(role).label)
         return accounts
 
     def stat(self, id: str):

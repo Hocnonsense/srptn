@@ -1,6 +1,7 @@
 import streamlit as st
 
-from srptn.common.accounts.session import require_actor
+from srptn.common.accounts.policy import Role
+from srptn.common.accounts.session import require_actor, require_role
 from srptn.common.components.categories import category_editor
 from srptn.common.components.descriptions import desc_editor
 from srptn.common.components.entities import data_selector
@@ -12,7 +13,7 @@ from srptn.common.data.entities.dataset import Dataset
 from srptn.common.data.fs import FSDataStore
 
 actor = require_actor()
-owner = actor.id
+require_role(actor, Role.HOST)
 data_store = FSDataStore()
 
 categories = category_editor("workflow-meta")
@@ -24,7 +25,7 @@ analysis_name = persistent_text_input(
 )
 
 render_continue = True
-address = Address(owner, Analysis, categories=categories, name=analysis_name)
+address = Address(actor.id, Analysis, categories=categories, name=analysis_name)
 if data_store.occupied(address, only_check_meta=True):
     st.error(f"Analysis {address} already exists")
     render_continue = False

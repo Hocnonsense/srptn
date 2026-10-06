@@ -39,7 +39,7 @@ class AccountRepository:
         return (
             Account(
                 id=row["id"],
-                role=Role(row["role"]),
+                role=Role.from_label(row["role"]),
                 status=AccountStatus(row["status"]),
                 version=row["version"],
                 created_at=row["created_at"],
@@ -64,7 +64,7 @@ class AccountRepository:
                     "INSERT INTO users ("
                     "id, password_hash, role, status, version, created_at) "
                     "VALUES (?, ?, ?, 'onhold', 1, ?)",
-                    (id, password_hash, role.value, utcnow()),
+                    (id, password_hash, role.label, utcnow()),
                 )
             except sqlite3.IntegrityError as exc:
                 raise Account.Occupied(f"Account id {id!r} is taken") from exc

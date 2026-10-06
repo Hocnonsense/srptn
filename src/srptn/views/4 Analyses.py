@@ -4,7 +4,6 @@ from srptn.common.data.entities.analysis import Analysis
 from srptn.common.data.fs import FSDataStore
 
 actor = require_actor()
-owner = actor.id
 data = FSDataStore()
 
-entity_browser(data, Analysis, owner)
+entity_browser(data, Analysis, actor)

@@ -7,16 +7,12 @@ actor through :func:`require_actor`; they never touch the database or raw
 session keys.
 """
 
-from typing import TYPE_CHECKING
-
 import streamlit as st
 
 from .models import Account, Session
+from .policy import Actor, Role
 from .service import AccountService
 from .settings import resolve_database_path
-
-if TYPE_CHECKING:
-    from .policy import Actor
 
 _SESSION_KEY = "srptn-session"
 _ACTOR_KEY = "srptn-actor"
@@ -165,3 +161,14 @@ def require_actor():
         st.error("Not authenticated")
         st.stop()
     return actor
+
+
+def require_role(actor: Actor, minimum: Role):
+    """Stop the page unless the actor's role is at least ``minimum``.
+
+    This is the server-side gate that also covers direct access to a page;
+    hiding a page from the navigation only affects convenience.
+    """
+    if actor.role < minimum:
+        st.error("You do not have permission to view this page.")
+        st.stop()

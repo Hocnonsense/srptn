@@ -66,7 +66,7 @@ class Account(NamedTuple):
 
     def describe(self):
         return (
-            f"{self.id}, {self.status.value} {self.role.value} "
+            f"{self.id}, {self.status.value} {self.role.label} "
             f"registered at {self.created_at}, {self.version} edits"
         )
 

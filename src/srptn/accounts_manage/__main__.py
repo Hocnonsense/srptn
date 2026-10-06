@@ -46,14 +46,14 @@ def _build_parser():
 
     set_role = sub.add_parser("set-role", help="change an account's role")
     set_role.add_argument("id")
-    set_role.add_argument("role", choices=[r.value for r in Role])
+    set_role.add_argument("role", choices=[r.label for r in Role])
 
     stat = sub.add_parser("stat", help="show an account and audit events")
     stat.add_argument("id")
 
     ls = sub.add_parser("ls", help="list accounts")
     ls.add_argument("--status", choices=[s.value for s in AccountStatus])
-    ls.add_argument("--role", choices=[r.value for r in Role])
+    ls.add_argument("--role", choices=[r.label for r in Role])
 
     return parser
 
@@ -69,7 +69,7 @@ def _run(args):
         elif args.command == "set-role":
             account = service.set_role(
                 args.id,
-                Role(args.role),
+                Role.from_label(args.role),
                 operator_id=args.operator,
             )
             print(f"Role set: {account.describe()}")

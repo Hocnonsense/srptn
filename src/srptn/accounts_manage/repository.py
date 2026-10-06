@@ -43,9 +43,9 @@ class ManageAccountRepository(AccountRepository):
             self._check_version(conn, session)
             conn.execute(
                 "UPDATE users SET role = ?, version = version + 1 WHERE id = ?",
-                (role.value, session.id),
+                (role.label, session.id),
             )
-            self._log(conn, f"set_role_{role.value}", operator_id, session.id)
+            self._log(conn, f"set_role_{role.label}", operator_id, session.id)
         return self._account(session.id)
 
     def list_accounts(self):
@@ -55,7 +55,7 @@ class ManageAccountRepository(AccountRepository):
         return pl.DataFrame(
             {
                 "id": [row["id"] for row in rows],
-                "role": [Role(row["role"]) for row in rows],
+                "role": [Role.from_label(row["role"]).label for row in rows],
                 "status": [AccountStatus(row["status"]) for row in rows],
             },
             schema={"id": pl.Utf8, "role": pl.Categorical, "status": pl.Categorical},

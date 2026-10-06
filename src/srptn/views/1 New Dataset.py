@@ -11,13 +11,12 @@ from srptn.common.data.fs import FSDataStore
 from srptn.common.utils.polars_utils import load_data_table
 
 actor = require_actor()
-owner = actor.id
 data_store = FSDataStore()
 
 categories = category_editor("new_dataset-meta")
 dataset_name = st.text_input("Dataset name")
 
-address = Address(owner, Dataset, categories=categories, name=dataset_name)
+address = Address(actor.id, Dataset, categories=categories, name=dataset_name)
 if data_store.occupied(address):
     st.error(f"Dataset {address} already exists")
     st.stop()
