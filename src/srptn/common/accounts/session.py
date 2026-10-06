@@ -2,16 +2,16 @@
 
 The entrypoint calls :func:`current_actor` on every rerun: it re-reads the
 account from the database and caches the resulting :class:`Actor` so that a
-password change, role change or disable revokes the session.  Pages only read
-that cached actor through :func:`require_actor`; they never touch the
-database or raw session keys.
+password or status change revokes the session.  Pages only read that cached
+actor through :func:`require_actor`; they never touch the database or raw
+session keys.
 """
 
 from typing import TYPE_CHECKING
 
 import streamlit as st
 
-from .models import AccountDisabled, InvalidCredentials
+from .models import Account, Session
 from .service import AccountService
 from .settings import resolve_database_path
 
@@ -46,21 +46,22 @@ def current_account(service: AccountService):
     A missing account, a disabled account or a ``version`` mismatch
     (password/role change or disable) ends the session.
     """
-    session = st.session_state.get(_SESSION_KEY)
-    if not session:
+    session = current_session()
+    if session is None:
         return None
-    account = service.get_account(session.get("id", ""))
-    if (
-        account is None
-        or not account.is_active
-        or account.version != session.get("version")
-    ):
+    account = service.get_account(session.id)
+    if account is None or not account.is_active or account.version != session.version:
         st.session_state.pop(_SESSION_KEY, None)
         st.session_state.pop(_ACTOR_KEY, None)
         st.session_state[_REVOKED_KEY] = True
         return None
     st.session_state[_ACTOR_KEY] = account.actor()
     return account
+
+
+def current_session() -> Session | None:
+    """Return the session token (id + version) or ``None``."""
+    return st.session_state.get(_SESSION_KEY)
 
 
 def current_actor(service: AccountService):
@@ -82,20 +83,74 @@ def login_form(service: AccountService):
         return
     try:
         account = service.verify_credentials(id_, password)
-    except InvalidCredentials:
+    except Account.InvalidCredentials:
         st.error("ID or password is incorrect")
-    except AccountDisabled:
-        st.error("This account is disabled")
+    except Account.OnHold:
+        st.error("Account is on hold, please contact an administrator")
     except ValueError as exc:
         st.error(str(exc))
     else:
-        st.session_state[_SESSION_KEY] = {
-            "id": account.id,
-            "version": account.version,
-        }
+        st.session_state[_SESSION_KEY] = account.session()
         st.session_state[_ACTOR_KEY] = account.actor()
         st.session_state.pop(_REVOKED_KEY, None)
         st.rerun()
+
+
+def register_form(service: AccountService):
+    """Render the self-registration form.
+
+    The account is created on hold; a maintainer must approve it before it
+    can log in.
+    """
+    st.subheader("Register")
+    with st.form("srptn-register-form"):
+        id_ = st.text_input("ID")
+        password = st.text_input("Password", type="password")
+        repeat = st.text_input("Repeat password", type="password")
+        submitted = st.form_submit_button("Register")
+    if not submitted:
+        return
+    if password != repeat:
+        st.error("Passwords do not match")
+        return
+    try:
+        service.register(id_, password)
+    except Account.Occupied:
+        st.error("This ID is already taken")
+        return
+    except ValueError as exc:
+        st.error(str(exc))
+        return
+    st.success(
+        "Registered. An administrator must approve your account before you can log in.",
+    )
+
+
+def change_password_form(service: AccountService, session: Session):
+    """Render the self-service password change form for the logged-in session."""
+    st.subheader("Change password")
+    with st.form("srptn-password-form"):
+        current = st.text_input("Current password", type="password")
+        new = st.text_input("New password", type="password")
+        repeat = st.text_input("Repeat new password", type="password")
+        submitted = st.form_submit_button("Change password")
+    if not submitted:
+        return
+    if new != repeat:
+        st.error("Passwords do not match")
+        return
+    try:
+        account = service.change_password(session, current, new)
+    except Account.NotFound:
+        logout()
+        st.session_state[_REVOKED_KEY] = True
+        st.rerun()
+    except ValueError as exc:
+        st.error(str(exc))
+        return
+    # Keep the current session logged in with the bumped version.
+    st.session_state[_SESSION_KEY] = account.session()
+    st.success("Password changed. Use the new password next time.")
 
 
 def require_actor():

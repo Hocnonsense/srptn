@@ -14,8 +14,8 @@ SCHEMA = [
         password_hash TEXT NOT NULL,
         role          TEXT NOT NULL
                       CHECK (role IN ('publisher', 'host', 'visitor')),
-        is_active     INTEGER NOT NULL DEFAULT 1
-                      CHECK (is_active IN (0, 1)),
+        status        TEXT NOT NULL DEFAULT 'onhold'
+                      CHECK (status IN ('active', 'onhold')),
         version       INTEGER NOT NULL DEFAULT 1,
         created_at    TEXT NOT NULL
     )
@@ -23,6 +23,8 @@ SCHEMA = [
     """
     CREATE TABLE account_events (
         event_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+        level       TEXT NOT NULL DEFAULT 'info'
+                    CHECK (level IN ('success', 'info', 'warning', 'danger')),
         action      TEXT NOT NULL,
         operator_id TEXT,
         target_id   TEXT NOT NULL,
@@ -33,8 +35,15 @@ SCHEMA = [
 ]
 
 EXPECTED_COLUMNS = {
-    "users": ["id", "password_hash", "role", "is_active", "version", "created_at"],
-    "account_events": ["event_id", "action", "operator_id", "target_id", "created_at"],
+    "users": ["id", "password_hash", "role", "status", "version", "created_at"],
+    "account_events": [
+        "event_id",
+        "level",
+        "action",
+        "operator_id",
+        "target_id",
+        "created_at",
+    ],
 }
 
 
