@@ -22,7 +22,7 @@ if actor is None:
     navigation = [st.Page(login_page, title="Log in")]
 else:
     with st.sidebar:
-        st.caption(f"Hello, {actor.id}!")
+        st.caption(f"Hello, {actor.role.value} {actor.id}!")
         if st.button("Logout", use_container_width=True):
             logout()
             st.rerun()

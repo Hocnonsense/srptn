@@ -11,7 +11,8 @@ from typing import TYPE_CHECKING
 
 import streamlit as st
 
-from .service import AccountDisabled, AccountService, InvalidCredentials
+from .models import AccountDisabled, InvalidCredentials
+from .service import AccountService
 from .settings import resolve_database_path
 
 if TYPE_CHECKING:

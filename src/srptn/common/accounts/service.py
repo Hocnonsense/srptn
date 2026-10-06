@@ -1,15 +1,15 @@
-"""Account service: the only supported entry point to the account database.
+"""Account service: credential verification for the platform.
 
-The service exposes create/verify/query/change-password/set-role/disable
-operations as an in-process module contract.  It returns identity records
-that never include the password hash.  An account's ``id`` is the stable key
-used for ownership and grants; resource grants and post-analysis memberships
-belong to the run platform and reference it.
+The base service composes an :class:`~.repository.AccountRepository` and
+provides what the web login needs: verifying credentials and reading an
+account.  Registration and password change live in the management package.
 """
 
 import re
-from pathlib import Path
-from typing import NamedTuple
+
+from .models import AccountDisabled, InvalidCredentials
+from .passwords import BcryptPasswordHasher, PasswordHasher
+from .repository import AccountRepository
 
 # The id is both the login name and the Address.owner, so it must be a
 # path-safe filename component.
@@ -35,84 +35,38 @@ def normalize_id(value: str):
     return value
 
 
-class AccountError(Exception):
-    """Base class for account service errors."""
-
-
-class InvalidCredentials(AccountError):
-    """The id or password is wrong."""
-
-
-class AccountDisabled(AccountError):
-    """The account exists but is disabled."""
-
-
-class Account(NamedTuple):
-    """A public identity record; deliberately omits the password hash."""
-
-    id: str
-    is_active: bool
-    version: int
-    created_at: str
+class AccountService:
+    """Account login operations."""
 
     @classmethod
-    def from_row(cls, row):
-        return cls(
-            id=row["id"],
-            is_active=bool(row["is_active"]),
-            version=row["version"],
-            created_at=row["created_at"],
-        )
-
-    def actor(self):
-        """Return the authorization principal.
-
-        A disabled account has no usable actor, so this raises
-        :class:`AccountDisabled` and policy never sees an inactive identity.
-        """
-        if not self.is_active:
-            raise AccountDisabled(f"Account {self.id!r} is disabled")
-        return Actor(self.id)
-
-    def describe(self):
-        state = "active" if self.is_active else "disabled"
-        return (
-            f"{self.id} state={state} "
-            f"version={self.version} created_at={self.created_at}"
-        )
-
-
-class Actor(NamedTuple):
-    """A server-generated identity snapshot.
-
-    ``id`` is the stable identifier used for ownership and grants and
-    ``role`` is the currently effective platform identity.  Disabled accounts
-    never produce an Actor, so policy can assume every Actor is usable.
-    """
-
-    id: str
-
-
-class AccountService:
-    """Create and maintain accounts in a private SQLite database."""
+    def open(
+        cls,
+        database_path: str | None = None,
+        hasher: PasswordHasher | None = None,
+    ):
+        """Open the service against the resolved database path."""
+        return cls(AccountRepository.load(database_path), hasher=hasher)
 
     def __init__(
         self,
-        database_path: str | Path,
+        repository: AccountRepository,
+        hasher: PasswordHasher | None = None,
     ):
-        self._db = database_path
+        self._repository = repository
+        self._hasher = hasher or BcryptPasswordHasher()
 
-    def verify_credentials(self, id: str, password: str) -> Account:
+    def verify_credentials(self, id: str, password: str):
         """Return the current account for valid, active credentials.
 
         Raises :class:`InvalidCredentials` for an unknown id or wrong password
         and :class:`AccountDisabled` for a disabled account.
         """
         normalized = normalize_id(id)
-        account = None
-        if normalized == "kosterlab" and password == "secret":
-            account = self.get_account(normalized)
-        if account is None:
+        result = self._repository.get(normalized)
+        if result is None:
+            raise InvalidCredentials("Invalid id or password")
+        account, password_hash = result
+        if not self._hasher.verify(password, password_hash):
             raise InvalidCredentials("Invalid id or password")
         if not account.is_active:
             raise AccountDisabled("Account is disabled")
@@ -124,17 +78,5 @@ class AccountService:
             normalized = normalize_id(id)
         except ValueError:
             return None
-        row = {
-            "id": normalized,
-            "is_active": True,
-            "version": 1,
-            "created_at": "2024-01-01T00:00:00Z",
-        }
-        return Account.from_row(row) if row is not None else None
-
-    @classmethod
-    def open(cls, database_path: str | None = None):
-        """Open the account service against the resolved database path."""
-        from .settings import resolve_database_path
-
-        return cls(resolve_database_path(database_path))
+        result = self._repository.get(normalized)
+        return result[0] if result is not None else None
