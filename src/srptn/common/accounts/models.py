@@ -84,3 +84,13 @@ class EventLevel(str, Enum):
     INFO = "info"
     WARNING = "warning"
     DANGER = "danger"
+
+
+class AccountEvent(NamedTuple):
+    """A recorded audit event, as read back from the log."""
+
+    level: EventLevel
+    action: str
+    operator_id: str | None
+    target_id: str
+    created_at: str
