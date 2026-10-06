@@ -271,11 +271,22 @@ class Analysis(Entity):
     def load(cls, data_store, address):
         """Create Analysis instance from stored data."""
         desc = data_store.load_desc(address)
-        datasets = [
-            Dataset.load(data_store, Address.from_filename(Path(f["name"]).stem))
-            for f in data_store.list_files(address, FileType.META).iter_rows(named=True)
-            if f["name"].endswith(".parquet")
-        ]
+        inputs = (
+            data_store.load_sheet(address, "input").iter_rows(named=True)
+            if data_store.has_sheet(address, "input")
+            else []
+        )
+        datasets = []
+        for i, row in enumerate(inputs):
+            dataset_address = Address.from_str(row["datasetid"])
+            datasets.append(
+                Dataset(
+                    address=dataset_address,
+                    desc=data_store.load_desc(dataset_address),
+                    sheet=data_store.load_sheet(address, f"input/sheet-{i}"),
+                    _data_store=data_store,
+                ),
+            )
         workflow_manager = WorkflowManager.load(data_store, address)
         analysis_run_manager = AnalysisRuntimeManager(str(address))
         return cls(address, desc, datasets, workflow_manager, analysis_run_manager)
@@ -285,16 +296,20 @@ class Analysis(Entity):
         # FIXME: mixed data_store from .store and .load
         data_store.store_desc(self.address, self.desc)
         dataset_entities = {}
+        sheets = {}
         for dataset in self.datasets:
             if dataset.sheet is not None:
-                dataset_entities[str(dataset.address)] = dataset.list_files(
-                    FileType.DATA
-                )["name"].to_list()
-                data_store.store_sheet(
-                    self.address,
-                    dataset.sheet,
-                    dataset.address.to_filename(),
-                )
+                address = str(dataset.address)
+                dataset_entities[address] = dataset.list_files(FileType.DATA)[
+                    "name"
+                ].to_list()
+                sheets[address] = dataset.sheet
+        index = pl.DataFrame({"datasetid": list(sheets)})
+        data_store.store_sheet(self.address, index, "input")
+        for position, row in enumerate(index.iter_rows(named=True)):
+            data_store.store_sheet(
+                self.address, sheets[row["datasetid"]], f"input/sheet-{position}"
+            )
 
         self.workflow_manager.update_configs_from_session_state()
         # FIXME: only update tables for 'workflow-config-*-data'

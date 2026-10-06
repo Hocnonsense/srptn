@@ -1,5 +1,4 @@
 import io
-import re
 from abc import ABC, abstractmethod
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
@@ -32,19 +31,6 @@ class Address:
         owner, entity, *categories, name = value.split("/")
         entity = _entity_types[entity]
         return cls(owner=owner, entity_type=entity, categories=categories, name=name)
-
-    @classmethod
-    def from_filename(cls, filename: str):
-        """Parse an address from a filename."""
-        if not filename or "___" not in filename:
-            raise ValueError("Invalid filename format")
-        return cls.from_str(re.sub(r"___", "/", filename))
-
-    def to_filename(self):
-        """Convert the address to a filename-safe format."""
-        if "/" not in str(self):
-            raise ValueError("Invalid address format")
-        return re.sub(r"/", "___", str(self))
 
     def __str__(self):
         """Return the address as a formatted string."""
