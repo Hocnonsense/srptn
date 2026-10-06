@@ -7,38 +7,15 @@ that cached actor through :func:`require_actor`; they never touch the
 database or raw session keys.
 """
 
+from typing import TYPE_CHECKING
+
 import streamlit as st
 
+from .service import AccountDisabled, AccountService, InvalidCredentials
+from .settings import resolve_database_path
 
-class AccountService:
-    accounts = {}
-
-    def __init__(self, path):
-        pass
-
-    def verify_credentials(self, username: str, password: str):
-        if username == "koesterlab" and password == "1234":
-
-            class Role:
-                value = "admin"
-
-            class Account:
-                owner = "koesterlab"
-                user_id = "koesterlab"
-                role = Role()
-
-                def actor(self):
-                    return type(
-                        "Actor", (), {"user_id": self.user_id, "role": self.role}
-                    )()
-
-            a = Account()
-            self.accounts[username] = a
-            st.session_state[_ACTOR_KEY] = a.actor()
-            return a
-        else:
-            raise Exception('username == "koesterlab" and password == "1234"')
-
+if TYPE_CHECKING:
+    from .policy import Actor
 
 _SESSION_KEY = "srptn-session"
 _ACTOR_KEY = "srptn-actor"
@@ -51,17 +28,10 @@ _services: dict[str, AccountService] = {}
 
 def account_service(database_path: str | None = None):
     """Return the shared account service for the resolved database path."""
-    path = database_path or ""
-    _services[path] = AccountService(path)
+    path = resolve_database_path(database_path)
+    if path not in _services:
+        _services[path] = AccountService.open(path)
     return _services[path]
-
-
-def login(service: AccountService, username: str, password: str):
-    """Verify credentials and start a session.
-
-    Raises :class:`InvalidCredentials` or :class:`AccountDisabled`.
-    """
-    return service.verify_credentials(username, password)
 
 
 def logout():
@@ -72,10 +42,24 @@ def logout():
 def current_account(service: AccountService):
     """Return the session's account, re-validating it against the database.
 
-    A missing account, a disabled account or an ``auth_version`` mismatch
+    A missing account, a disabled account or a ``version`` mismatch
     (password/role change or disable) ends the session.
     """
-    return service.accounts.get("koesterlab")
+    session = st.session_state.get(_SESSION_KEY)
+    if not session:
+        return None
+    account = service.get_account(session.get("id", ""))
+    if (
+        account is None
+        or not account.is_active
+        or account.version != session.get("version")
+    ):
+        st.session_state.pop(_SESSION_KEY, None)
+        st.session_state.pop(_ACTOR_KEY, None)
+        st.session_state[_REVOKED_KEY] = True
+        return None
+    st.session_state[_ACTOR_KEY] = account.actor()
+    return account
 
 
 def current_actor(service: AccountService):
@@ -88,32 +72,39 @@ def login_form(service: AccountService):
     """Render the login form, logging in the user on success."""
     st.subheader("Login")
     if st.session_state.pop(_REVOKED_KEY, False):
-        st.warning(
-            "Your session has expired or the account was disabled. "
-            "Please log in again.",
-        )
+        st.warning("The last session has ended. Please log in again.")
     with st.form("srptn-login-form"):
-        username = st.text_input("Username")
+        id_ = st.text_input("ID")
         password = st.text_input("Password", type="password")
         submitted = st.form_submit_button("Login")
     if not submitted:
         return
     try:
-        login(service, username, password)
+        account = service.verify_credentials(id_, password)
+    except InvalidCredentials:
+        st.error("ID or password is incorrect")
+    except AccountDisabled:
+        st.error("This account is disabled")
     except ValueError as exc:
         st.error(str(exc))
-        return
-    st.rerun()
+    else:
+        st.session_state[_SESSION_KEY] = {
+            "id": account.id,
+            "version": account.version,
+        }
+        st.session_state[_ACTOR_KEY] = account.actor()
+        st.session_state.pop(_REVOKED_KEY, None)
+        st.rerun()
 
 
-def require_actor() -> Actor:
+def require_actor():
     """Return the actor cached by the entrypoint, or stop the page.
 
     Pages run only through the navigation entrypoint, which validates the
     session and caches the actor; an absent actor means the page was reached
     without authentication.
     """
-    actor = st.session_state.get(_ACTOR_KEY)
+    actor: Actor | None = st.session_state.get(_ACTOR_KEY)
     if actor is None:
         st.error("Not authenticated")
         st.stop()

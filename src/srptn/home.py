@@ -12,7 +12,7 @@ st.set_page_config(page_title="SRPTN")
 
 def login_page():
     st.title("SRPTN - the Snakemake research platform")
-    login_form(account_service())
+    login_form(service)
 
 
 service = account_service()
@@ -22,7 +22,7 @@ if actor is None:
     navigation = [st.Page(login_page, title="Log in")]
 else:
     with st.sidebar:
-        st.caption(f"Signed in as {actor.user_id} ({actor.role.value})")
+        st.caption(f"Hello, {actor.id}!")
         if st.button("Logout", use_container_width=True):
             logout()
             st.rerun()
