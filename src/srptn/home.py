@@ -34,7 +34,6 @@ if actor is None:
 else:
 
     def account_page():
-        st.title("Account")
         session = current_session()
         if actor is None or session is None:
             # Unreachable via the authenticated navigation, but a session can
@@ -42,17 +41,17 @@ else:
             st.error("Your session has ended. Please log in again.")
             logout()
             st.stop()
-        st.caption(f"Hello, {actor.role.label} {actor.id}!")
+        st.title(f"Hello, {actor.role.label} {actor.id}!")
         change_password_form(service, session)
         if st.button("Logout", use_container_width=True):
             logout()
             st.rerun()
 
     entries = [
-        ("views/1 New Dataset.py", "New Dataset", Role.HOST),
-        ("views/2 Datasets.py", "Datasets", Role.VISITOR),
-        ("views/3 New Analysis.py", "New Analysis", Role.HOST),
-        ("views/4 Analyses.py", "Analyses", Role.VISITOR),
+        ("views/dataset_new.py", "New Dataset", Role.HOST),
+        ("views/datasets.py", "Datasets", Role.VISITOR),
+        ("views/analysis_new.py", "New Analysis", Role.HOST),
+        ("views/analyses.py", "Analyses", Role.VISITOR),
         ("views/5 Notebook (Mockup).py", "Notebook (Mockup)", Role.VISITOR),
         ("views/6 Compose Figure (Mockup).py", "Compose Figure (Mockup)", Role.VISITOR),
         (account_page, "Account", None),
