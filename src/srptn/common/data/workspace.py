@@ -12,8 +12,6 @@ import fcntl
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     import polars as pl
 
     from . import Address, FileType

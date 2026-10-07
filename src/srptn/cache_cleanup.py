@@ -15,8 +15,9 @@ def main():
     args = parser.parse_args()
     if not math.isfinite(args.older_than_days) or args.older_than_days <= 0:
         parser.error("--older-than-days must be finite and positive")
-    store = FSDataStore(base_cache=args.cache_dir)
-    store.clean_cache(timedelta(days=args.older_than_days))
+    FSDataStore(base_cache=args.cache_dir).clean_cache(
+        timedelta(days=args.older_than_days)
+    )
 
 
 if __name__ == "__main__":

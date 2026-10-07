@@ -1,6 +1,7 @@
 """Reuse repository downloads while deploying from isolated temporary copies."""
 
 import hashlib
+import shutil
 import subprocess
 import tarfile
 import tempfile
@@ -217,6 +218,19 @@ class CachedWorkflowManager:
                 return refs.branches[branch]
             raise ValueError(f"Unknown workflow ref: {branch}")
         raise ValueError("Either tag or branch must be specified for ref resolution")
+
+    def deploy(
+        self, data_path: Path, name: str, url: str, *, commit: str | None = None
+    ):
+        """Deploy ``url`` at ``commit`` into the workspace's data path.
+
+        Previous content is cleared first; the caller rolls back on failure.
+        """
+        with self.deployer(url, data_path, commit=commit) as deployer:
+            deployer.deploy(name)
+            schema_path = Path(deployer.repo_clone) / "workflow" / "schemas"
+            if schema_path.exists():
+                shutil.copytree(schema_path, data_path / "workflow" / "schemas")
 
     def deployer(self, url: str, dest: Path, *, commit: str | None = None, force=False):
         """Prepare one isolated clone and let snakedeploy use it directly."""

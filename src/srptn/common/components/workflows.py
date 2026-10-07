@@ -45,19 +45,19 @@ auto_open_script = """
 
 def workflow_selector(address: Address, data_store: FSDataStore):
     """Select a cached or fetched repository and Git refs and confirmed commit hashes."""
-    selected = _select_workflow(data_store)
+    cached = CachedWorkflowManager(data_store)
+    selected = _select_workflow(cached)
     if selected is None:
         return None
     url, tag, branch, commit = selected
     selection = (url, commit, str(address))
     if st.button("Deploy", key="workflow-meta-deploy"):
-        return _selected_workflow(address, data_store, url, tag, branch, commit)
+        return _selected_workflow(cached, address, data_store, url, tag, branch, commit)
     if st.session_state.get("workflow-selected-version") == selection:
         return st.session_state.get("workflow-selected-manager")
 
 
-def _select_workflow(data_store: FSDataStore):
-    cached = CachedWorkflowManager(data_store)
+def _select_workflow(cached: CachedWorkflowManager):
     repositories = list(cached.available_workflows())
     pending_source = st.session_state.pop("workflow-meta-pending-source", None)
     if pending_source in repositories:
@@ -238,13 +238,17 @@ def _select_workflow(data_store: FSDataStore):
 
 
 def _selected_workflow(
-    address: Address, data_store: FSDataStore, url: str, tag, branch, commit: str | None
+    cached: CachedWorkflowManager,
+    address: Address,
+    data_store: FSDataStore,
+    url: str,
+    tag,
+    branch,
+    commit: str | None,
 ):
     if commit is None and (tag is not None or branch is not None):
         try:
-            commit = CachedWorkflowManager(data_store).resolve_ref(
-                url, tag=tag, branch=branch
-            )
+            commit = cached.resolve_ref(url, tag=tag, branch=branch)
         except (OSError, subprocess.CalledProcessError, UserError, ValueError) as error:
             st.error(f"Failed to resolve workflow version: {error}")
             return None
@@ -253,15 +257,13 @@ def _selected_workflow(
         for key in list(st.session_state):
             if isinstance(key, str) and key.startswith("workflow-config-"):
                 del st.session_state[key]
-        manager = WorkflowManager(
-            url,
-            tag,
-            branch,
-            data_store.workspace(address),
-            commit=commit,
-        )
+        workspace = data_store.workspace(address)
         try:
-            manager.store()
+            with workspace as data_path:
+                cached.deploy(data_path, address.name, url, commit=commit)
+            manager = WorkflowManager(url, tag, branch, workspace, commit=commit)
+            manager.check()
+            manager.export_metadata()
         except (
             OSError,
             subprocess.CalledProcessError,
@@ -269,8 +271,12 @@ def _selected_workflow(
             ValueError,
             RuntimeError,
         ) as error:
+            workspace.clean()
             st.error(f"Failed to deploy workflow: {error}")
             return None
+        except BaseException:
+            workspace.clean()
+            raise
         st.session_state["workflow-selected-manager"] = manager
         st.session_state["workflow-selected-version"] = selection
     return st.session_state["workflow-selected-manager"]

@@ -1,5 +1,4 @@
 import json
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -11,7 +10,6 @@ import yaml
 from ...components.logs import log_selector
 from ...tmux import TmuxSessionManager
 from ...utils.polars_utils import load_data_table, save_data_table
-from ...utils.snakedeploy import CachedWorkflowManager
 from ...utils.yaml_utils import CustomSafeDumper, CustomSafeLoader
 from .. import Address, DataStore, Entity, FileType
 from ..entities.dataset import Dataset
@@ -44,24 +42,10 @@ class WorkflowManager:
         workflow_manager.check()
         return workflow_manager
 
-    def store(self):
-        """Deploys the workflow and copies required files."""
-        self.workspace.clean()
-        with self.workspace as data_path:
-            with CachedWorkflowManager(self.workspace.store).deployer(
-                self.url, data_path, commit=self.commit
-            ) as wd:
-                wd.deploy(self.workspace.address.name)
-                schema_path = Path(wd.repo_clone) / "workflow" / "schemas"
-                if schema_path.exists():
-                    shutil.copytree(schema_path, self.schema_dir)
-        self.check()
-        self.export_metadata()
-
     @property
     def config_dir(self):
         """Configuration directory path."""
-        return self.data_path / "config"
+        return self.workspace.data_path / "config"
 
     @property
     def config_path(self):
@@ -72,23 +56,13 @@ class WorkflowManager:
                 return path
 
     @property
-    def data_path(self):
-        """Workflow data directory path."""
-        return self.workspace.data_path
-
-    @property
     def log_path(self):
         """Snakemake log directory path if it exists."""
-        hidden_snankemake_path = self.data_path / Path(".snakemake")
+        hidden_snankemake_path = self.workspace.data_path / Path(".snakemake")
         if hidden_snankemake_path.is_dir():
             log_path = hidden_snankemake_path / Path("log")
             if log_path.is_dir():
                 return log_path
-
-    @property
-    def meta_path(self):
-        """Metadata directory path."""
-        return self.workspace.meta_path
 
     @property
     def schema_dir(self):
@@ -98,7 +72,7 @@ class WorkflowManager:
     @property
     def snakefile_path(self):
         """Path to Snakefile if it exists."""
-        for snakefile_dir in (self.workflow_dir, self.data_path):
+        for snakefile_dir in (self.workflow_dir, self.workspace.data_path):
             path = snakefile_dir / "Snakefile"
             if path.exists():
                 return path
@@ -106,7 +80,7 @@ class WorkflowManager:
     @property
     def workflow_dir(self):
         """Workflow directory path."""
-        return self.data_path / "workflow"
+        return self.workspace.data_path / "workflow"
 
     def check(self):
         """Validate key workflow files."""
@@ -126,7 +100,8 @@ class WorkflowManager:
             "branch": self.branch,
             "commit": self.commit,
         }
-        with (self.meta_path / "details.yml").open("w") as f:
+        self.workspace.meta_path.mkdir(parents=True, exist_ok=True)
+        with (self.workspace.meta_path / "details.yml").open("w") as f:
             yaml.safe_dump(details, f)
 
     def get_config(self) -> dict | None:
@@ -173,7 +148,7 @@ class WorkflowManager:
                 and isinstance(st.session_state[entry], pl.DataFrame)
             ):
                 data = st.session_state[entry]
-                data_path = self.data_path / st.session_state[entry[:-5]]
+                data_path = self.workspace.data_path / st.session_state[entry[:-5]]
                 save_data_table(data, data_path)
 
     def write_config(self, config: dict):
@@ -259,7 +234,9 @@ class Analysis(Entity):
         if can_run and c1.button(
             "Run Analysis", key=f"{self.address.__str__}-run_button"
         ):
-            command = f"cd {self.workflow_manager.data_path} && snakemake -c 2"
+            command = (
+                f"cd {self.workflow_manager.workspace.data_path} && snakemake -c 2"
+            )
             self.analysis_run_manager.launch_analysis(command)
         if c2.button(
             "Check Status",
@@ -313,7 +290,7 @@ class Analysis(Entity):
 
         self.workflow_manager.update_configs_from_session_state()
         # FIXME: only update tables for 'workflow-config-*-data'
-        for path_obj in self.workflow_manager.data_path.rglob("*"):
+        for path_obj in self.workflow_manager.workspace.data_path.rglob("*"):
             if path_obj.is_file() and path_obj.suffix in (".tsv", ".csv", ".xlsx"):
                 self.update_data_paths(path_obj, dataset_entities)
         for key in st.session_state:

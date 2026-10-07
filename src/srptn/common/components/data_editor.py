@@ -306,7 +306,7 @@ def data_selector(
             st.session_state.pop(data_schema_key)
 
         st.session_state[data_key] = load_data_table(
-            workflow_manager.data_path / input_value,
+            workflow_manager.workspace.data_path / input_value,
         )
 
         st.session_state[data_key_changed] = input_value
