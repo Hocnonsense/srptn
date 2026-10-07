@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     import polars as pl
 
     from ..accounts.policy import Actor
+    from ..access.store import AccessStore
     from .workspace import Workspace
 
 
@@ -61,9 +62,18 @@ class Entity(ABC):
         if self.address.entity_type != self.__class__:
             raise ValueError(f"Address type must be '{self.__class__.__name__}'")
 
+    def can_run(self, actor: "Actor", access: "AccessStore | None"):
+        """Check if the actor can run/stop this entity."""
+        return access is not None and access.can_run(actor, self.address)
+
     @abstractmethod
-    def show(self, actor: "Actor", *, can_run: bool = False) -> None:
-        """Display the entity; ``can_run`` enables run/stop controls."""
+    def show(self, actor: "Actor", access: "AccessStore") -> None:
+        """Display the entity.
+
+        The entity is already authorized (it came from ``AccessStore``), so its
+        own data needs no further check; ``access`` is only required for
+        actor-level actions such as running an analysis.
+        """
         ...
 
     @classmethod

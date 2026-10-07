@@ -18,8 +18,11 @@ class Dataset(Entity):
     meta_files: Sequence[io.BytesIO] | None = None
     _data_store: DataStore | None = None
 
-    def show(self, actor, *, can_run: bool = False):
-        """Display the dataset details, sample sheet, and downloadable files."""
+    def show(self, actor, access):
+        """Display the dataset details, sample sheet, and downloadable files.
+
+        The dataset is already authorized; its own files are read directly.
+        """
         st.header(self.address, divider=True)
         st.markdown(self.desc)
         if self.sheet is not None:

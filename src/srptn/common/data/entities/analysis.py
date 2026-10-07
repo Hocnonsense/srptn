@@ -2,6 +2,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+from typing import TYPE_CHECKING
 import polars as pl
 import streamlit as st
 import yaml
@@ -14,6 +15,10 @@ from ...utils.yaml_utils import CustomSafeDumper, CustomSafeLoader
 from .. import Address, DataStore, Entity, FileType
 from ..entities.dataset import Dataset
 from ..workspace import Workspace
+
+if TYPE_CHECKING:
+    from ...access.store import AccessStore
+    from ...accounts.policy import Actor
 
 
 @dataclass
@@ -164,15 +169,22 @@ class WorkflowManager:
 class AnalysisRuntimeManager:
     """Manages workflow execution in tmux sessions."""
 
-    def __init__(self, analysis_name: str, owner: str | None = None):
-        self.analysis_name = analysis_name
-        self.session_name = f"{analysis_name}_session"
+    def __init__(self, address: Address):
+        self.address = address
+        self.analysis_name = str(address)
+        self.session_name = f"{address}_session"
         self.tmux_manager = TmuxSessionManager()
         self.output: str | None = None
-        self.owner = owner
+
+    def _authorized(self, access: "AccessStore", actor: "Actor"):
+        """Re-check run/stop permission against the current account state."""
+        if not access.can_run(actor, self.address):
+            st.error("You do not have permission to run or stop this analysis.")
+            return False
+        return True
 
     @st.dialog("Analysis Progress", width="large")
-    def show(self, actor, *, can_stop: bool = False):
+    def show(self, access, actor):
         """Show analysis progress dialog & displays real-time output."""
         self.check_status()
 
@@ -188,18 +200,18 @@ class AnalysisRuntimeManager:
         if c1.button("Close", key=f"{self.analysis_name}-close"):
             st.rerun()
         if c2.button("Stop Analysis", key=f"{self.analysis_name}-stop"):
-            if can_stop:
+            if self._authorized(access, actor):
                 self.tmux_manager.close_session(self.session_name)
-            else:
-                st.error("You do not have permission to stop this analysis.")
 
     def check_status(self) -> None:
         """Update stored analysis output from tmux session."""
         output = self.tmux_manager.capture_output(self.session_name)
         self.output = output
 
-    def launch_analysis(self, command: str):
-        """Start analysis in new tmux session."""
+    def launch_analysis(self, access: "AccessStore", actor: "Actor", command: str):
+        """Start analysis in new tmux session (authorization re-checked)."""
+        if not self._authorized(access, actor):
+            return
         session = self.tmux_manager.create_session(self.session_name)
         session.active_window.resize(width=500)  # Extra wide for no artificial \n
         assert session.active_pane is not None
@@ -214,10 +226,14 @@ class Analysis(Entity):
     workflow_manager: WorkflowManager
     analysis_run_manager: AnalysisRuntimeManager | None = None
 
-    def show(self, actor, *, can_run: bool = False):
-        """Display analysis UI components."""
+    def show(self, actor, access):
+        """Display analysis UI components.
+
+        The analysis is already authorized; ``access`` is required only for the
+        actor-level run/stop permission.
+        """
         if self.analysis_run_manager is None:
-            self.analysis_run_manager = AnalysisRuntimeManager(str(self.address))
+            self.analysis_run_manager = AnalysisRuntimeManager(self.address)
         st.header(self.address, divider=True)
         st.markdown(self.desc)
 
@@ -231,18 +247,18 @@ class Analysis(Entity):
             log_selector(self.workflow_manager)
 
         c1, c2 = st.columns([0.21, 0.79])
-        if can_run and c1.button(
+        if self.can_run(actor, access) and c1.button(
             "Run Analysis", key=f"{self.address.__str__}-run_button"
         ):
             command = (
                 f"cd {self.workflow_manager.workspace.data_path} && snakemake -c 2"
             )
-            self.analysis_run_manager.launch_analysis(command)
+            self.analysis_run_manager.launch_analysis(access, actor, command)
         if c2.button(
             "Check Status",
             key=f"{self.analysis_run_manager.analysis_name}-status_open",
         ):
-            self.analysis_run_manager.show(actor, can_stop=can_run)
+            self.analysis_run_manager.show(access, actor)
 
     @classmethod
     def load(cls, data_store, address):
@@ -266,27 +282,31 @@ class Analysis(Entity):
                 ),
             )
         workflow_manager = WorkflowManager.load(workspace)
-        analysis_run_manager = AnalysisRuntimeManager(str(address), owner=address.owner)
+        analysis_run_manager = AnalysisRuntimeManager(address)
         return cls(address, desc, datasets, workflow_manager, analysis_run_manager)
 
-    def store(self, data_store: DataStore):
-        """Save analysis state to storage."""
-        # FIXME: mixed data_store from .store and .load
-        workspace = data_store.workspace(self.address)
+    def write_entity(self, workspace):
+        """Persist the description and input sheets (not the run config)."""
         workspace.store_desc(self.desc)
-        dataset_entities = {}
-        sheets = {}
-        for dataset in self.datasets:
-            if dataset.sheet is not None:
-                address = str(dataset.address)
-                dataset_entities[address] = dataset.list_files(FileType.DATA)[
-                    "name"
-                ].to_list()
-                sheets[address] = dataset.sheet
+        sheets = {
+            str(dataset.address): dataset.sheet
+            for dataset in self.datasets
+            if dataset.sheet is not None
+        }
         index = pl.DataFrame({"datasetid": list(sheets)})
         workspace.store_sheet(index, "input")
         for position, row in enumerate(index.iter_rows(named=True)):
             workspace.store_sheet(sheets[row["datasetid"]], f"input/sheet-{position}")
+
+    def store(self, data_store: DataStore):
+        """Save analysis state to storage."""
+        workspace = data_store.workspace(self.address)
+        self.write_entity(workspace)
+        dataset_entities = {
+            str(dataset.address): dataset.list_files(FileType.DATA)["name"].to_list()
+            for dataset in self.datasets
+            if dataset.sheet is not None
+        }
 
         self.workflow_manager.update_configs_from_session_state()
         # FIXME: only update tables for 'workflow-config-*-data'

@@ -8,7 +8,7 @@ from .schemas import infer_schema, update_schema
 from .ui_components import persistent_text_input
 from ..data import Address
 from ..data.fs import FSDataStore
-from ..data.entities.analysis import WorkflowManager
+from ..data.entities.analysis import Analysis, WorkflowManager
 
 auto_open_script = """
 <script>(() => {
@@ -43,7 +43,15 @@ auto_open_script = """
 """
 
 
-def workflow_selector(address: Address, data_store: FSDataStore):
+def workflow_selector(
+    access,
+    actor,
+    address: Address,
+    data_store: FSDataStore,
+    *,
+    desc=None,
+    datasets=None,
+):
     """Select a cached or fetched repository and Git refs and confirmed commit hashes."""
     cached = CachedWorkflowManager(data_store)
     selected = _select_workflow(cached)
@@ -52,7 +60,18 @@ def workflow_selector(address: Address, data_store: FSDataStore):
     url, tag, branch, commit = selected
     selection = (url, commit, str(address))
     if st.button("Deploy", key="workflow-meta-deploy"):
-        return _selected_workflow(cached, address, data_store, url, tag, branch, commit)
+        return _selected_workflow(
+            cached,
+            access,
+            actor,
+            address,
+            url,
+            tag,
+            branch,
+            commit,
+            desc=desc,
+            datasets=datasets,
+        )
     if st.session_state.get("workflow-selected-version") == selection:
         return st.session_state.get("workflow-selected-manager")
 
@@ -239,12 +258,16 @@ def _select_workflow(cached: CachedWorkflowManager):
 
 def _selected_workflow(
     cached: CachedWorkflowManager,
+    access,
+    actor,
     address: Address,
-    data_store: FSDataStore,
     url: str,
     tag,
     branch,
     commit: str | None,
+    *,
+    desc=None,
+    datasets=None,
 ):
     if commit is None and (tag is not None or branch is not None):
         try:
@@ -257,13 +280,17 @@ def _selected_workflow(
         for key in list(st.session_state):
             if isinstance(key, str) and key.startswith("workflow-config-"):
                 del st.session_state[key]
-        workspace = data_store.workspace(address)
+        workspace = access.workspace(actor, address)
         try:
             with workspace as data_path:
                 cached.deploy(data_path, address.name, url, commit=commit)
             manager = WorkflowManager(url, tag, branch, workspace, commit=commit)
             manager.check()
             manager.export_metadata()
+            if desc is not None:
+                # A successful deploy also persists the analysis (description and
+                # inputs), so it never leaves an occupied-but-empty address.
+                Analysis(address, desc, datasets or [], manager).write_entity(workspace)
         except (
             OSError,
             subprocess.CalledProcessError,

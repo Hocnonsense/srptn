@@ -10,7 +10,8 @@ if TYPE_CHECKING:
 def log_selector(workflow_manager: "WorkflowManager"):
     """Display a log file selection interface in a Streamlit application.
 
-    :param workflow_manager: The workflow manager object whose logs are to be accessed.
+    The analysis has already been authorized (it was listed by ``AccessStore``),
+    so its own logs need no further check.
     """
     log_path = workflow_manager.log_path
     if log_path:

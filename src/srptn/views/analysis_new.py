@@ -73,9 +73,12 @@ def page_new_analysis(actor: Actor):
         if not categories or not analysis_name:
             render_continue = False
 
-    workflow_manager = workflow_selector(address, data_store)
     if not render_continue:
         st.stop()
+
+    workflow_manager = workflow_selector(
+        access, actor, address, data_store, desc=desc, datasets=datasets
+    )
 
     if workflow_manager is not None:
         workflow_editor(workflow_manager)

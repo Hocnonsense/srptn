@@ -25,7 +25,7 @@ def entity_browser(access: AccessStore, entity_type: type[Entity], actor: Actor)
         return
 
     for entity in entities:
-        entity.show(actor, can_run=access.can_run(actor, entity.address))
+        entity.show(actor, access=access)
         if entity.address.owner == actor.id:
             _visibility_control(access, actor, entity.address)
 
