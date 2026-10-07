@@ -1,4 +1,9 @@
-import io
+"""Filesystem data store: content, a local workspace and the cache.
+
+Cache is a filesystem-only capability here (git clones, scratch, versioned
+entries, locks); remote backends raise for :meth:`workspace`.
+"""
+
 import fcntl
 import shutil
 from contextlib import ExitStack, contextmanager
@@ -8,16 +13,37 @@ from pathlib import Path
 
 import polars as pl
 
-from . import Address, DataStore, Entity, FileType
+from . import E, Address, DataStore, Entity, FileType
 
 
 @dataclass(slots=True)
 class FSDataStore(DataStore):
-    """A file-system-based implementation of the DataStore interface."""
+    """A file-system data store."""
 
     base_data: Path = Path("datastore/data")
     base_meta: Path = Path("datastore/meta")
     base_cache: Path = Path("datastore/cache")
+    base_global: Path = Path("datastore/global")
+
+    # --- global metadata ------------------------------------------------
+
+    def load_global_meta(self, name):
+        path = self.base_global / name
+        return path.read_bytes() if path.exists() else None
+
+    def store_global_meta(self, name, data):
+        path = self.base_global / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(f"{path.name}.tmp")
+        tmp.write_bytes(data)
+        tmp.replace(path)
+
+    # --- workspace / cache ----------------------------------------------
+
+    def workspace(self, address: Address):
+        from .workspace import Workspace
+
+        return Workspace(self, address)
 
     def cache_entries(self, owner=None, filter=lambda x: x):
         if owner is not None:
@@ -169,13 +195,7 @@ class FSDataStore(DataStore):
             )
         return pl.DataFrame(schema=["name", "size"])
 
-    def store_file(
-        self,
-        address: Address,
-        file: io.IOBase,
-        file_path: str,
-        file_type: FileType,
-    ) -> None:
+    def store_file(self, address, file, file_path, file_type):
         """Store a file of a specific type at the given address."""
         folder = self.files_path(address, file_type)
         file_path_ = folder / file_path
@@ -183,18 +203,13 @@ class FSDataStore(DataStore):
         with (file_path_).open("wb") as f:
             shutil.copyfileobj(file, f)
 
-    def store_desc(self, address: Address, desc: str) -> None:
+    def store_desc(self, address, desc):
         """Store the description text for the given address."""
         desc_path = self.desc_path(address)
         desc_path.parent.mkdir(exist_ok=True, parents=True)
         desc_path.write_text(desc)
 
-    def store_sheet(
-        self,
-        address: Address,
-        sheet: pl.DataFrame,
-        sheet_name: str,
-    ) -> None:
+    def store_sheet(self, address, sheet, sheet_name):
         """Store a sample sheet as a Parquet file at the given address."""
         sheet_path = self.sheet_path(address, sheet_name)
         sheet_path.parent.mkdir(exist_ok=True, parents=True)
@@ -203,13 +218,13 @@ class FSDataStore(DataStore):
         except Exception as e:
             raise RuntimeError(f"Failed to write sheet to {sheet_path}: {e}") from e
 
-    def entities(self, entity_type, search_term=None, only_owned_by=None):
+    def entities(self, entity_type: type[E], search_term=None, *, owned_by=None):
         """Retrieve entities of a specific type, filtered by search term and owner."""
-        addr = (
+        addr_ = (
             Address.from_str(str(desc.parent.relative_to(self.base_meta)))
             for desc in self.base_meta.glob("**/desc.md")
         )
-        addr = [a for a in addr if a.entity_type == entity_type]
+        addr = (a for a in addr_ if a.entity_type == entity_type)
 
         search_filter_func = owned_filter_func = lambda entity: True
 
@@ -218,10 +233,10 @@ class FSDataStore(DataStore):
             def search_filter_func(entity: Entity):
                 return search_term in str(entity.address) or search_term in entity.desc
 
-        if only_owned_by:  # safety
+        if owned_by:  # safety
 
             def owned_filter_func(entity: Entity):
-                return entity.address.owner == only_owned_by
+                return entity.address.owner == owned_by
 
         return list(
             filter(
@@ -265,3 +280,13 @@ class FSDataStore(DataStore):
             self.base_data if file_type == FileType.DATA else self.base_meta,
             address,
         )
+
+
+def fs_data_store(base: Path = Path("datastore")):
+    """A filesystem-backed data store rooted at ``base``."""
+    return FSDataStore(
+        base_data=base / "data",
+        base_meta=base / "meta",
+        base_cache=base / "cache",
+        base_global=base / "global",
+    )

@@ -1,19 +1,17 @@
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import streamlit as st
 
-from srptn.common.data import Address, DataStore
+if TYPE_CHECKING:
+    from srptn.common.data.entities.analysis import WorkflowManager
 
 
-def log_selector(data_store: DataStore, address: Address) -> str | None:
+def log_selector(workflow_manager: "WorkflowManager"):
     """Display a log file selection interface in a Streamlit application.
 
-    :param data_store: The data store object used to retrieve workflow manager information.
-    :param address: The address of the workflow manager whose logs are to be accessed.
+    :param workflow_manager: The workflow manager object whose logs are to be accessed.
     """
-    from common.data.entities.analysis import WorkflowManager
-
-    workflow_manager = WorkflowManager.load(data_store, address)
     log_path = workflow_manager.log_path
     if log_path:
         log_file_names = workflow_manager.get_log_names()

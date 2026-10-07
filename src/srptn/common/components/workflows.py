@@ -6,7 +6,8 @@ from ..utils.snakedeploy import CachedWorkflowManager
 from .config_editor import ace_config_editor, config_editor
 from .schemas import infer_schema, update_schema
 from .ui_components import persistent_text_input
-from ..data import Address, DataStore
+from ..data import Address
+from ..data.fs import FSDataStore
 from ..data.entities.analysis import WorkflowManager
 
 auto_open_script = """
@@ -42,8 +43,20 @@ auto_open_script = """
 """
 
 
-def workflow_selector(address: Address, data_store: DataStore):
+def workflow_selector(address: Address, data_store: FSDataStore):
     """Select a cached or fetched repository and Git refs and confirmed commit hashes."""
+    selected = _select_workflow(data_store)
+    if selected is None:
+        return None
+    url, tag, branch, commit = selected
+    selection = (url, commit, str(address))
+    if st.button("Deploy", key="workflow-meta-deploy"):
+        return _selected_workflow(address, data_store, url, tag, branch, commit)
+    if st.session_state.get("workflow-selected-version") == selection:
+        return st.session_state.get("workflow-selected-manager")
+
+
+def _select_workflow(data_store: FSDataStore):
     cached = CachedWorkflowManager(data_store)
     repositories = list(cached.available_workflows())
     pending_source = st.session_state.pop("workflow-meta-pending-source", None)
@@ -221,14 +234,12 @@ def workflow_selector(address: Address, data_store: DataStore):
         tag, branch, commit = (
             st.session_state[key] for key in (tag_key, branch_key, commit_key)
         )
-    selection = (url, commit, str(address))
-    if st.button("Deploy", key="workflow-meta-deploy"):
-        return _selected_workflow(url, tag, branch, commit, address, data_store)
-    if st.session_state.get("workflow-selected-version") == selection:
-        return st.session_state.get("workflow-selected-manager")
+    return url, tag, branch, commit
 
 
-def _selected_workflow(url, tag, branch, commit, address, data_store):
+def _selected_workflow(
+    address: Address, data_store: FSDataStore, url: str, tag, branch, commit: str | None
+):
     if commit is None and (tag is not None or branch is not None):
         try:
             commit = CachedWorkflowManager(data_store).resolve_ref(
@@ -246,8 +257,7 @@ def _selected_workflow(url, tag, branch, commit, address, data_store):
             url,
             tag,
             branch,
-            data_store,
-            address,
+            data_store.workspace(address),
             commit=commit,
         )
         try:

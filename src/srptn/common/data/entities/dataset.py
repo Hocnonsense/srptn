@@ -18,7 +18,7 @@ class Dataset(Entity):
     meta_files: Sequence[io.BytesIO] | None = None
     _data_store: DataStore | None = None
 
-    def show(self):
+    def show(self, actor, *, can_run: bool = False):
         """Display the dataset details, sample sheet, and downloadable files."""
         st.header(self.address, divider=True)
         st.markdown(self.desc)
@@ -44,35 +44,30 @@ class Dataset(Entity):
     @classmethod
     def load(cls, data_store, address):
         """Load a dataset from the data store using its address."""
+        workspace = data_store.workspace(address)
         sheet_name = "sheet"
-        if data_store.has_sheet(address, sheet_name):
-            sheet = data_store.load_sheet(address, sheet_name)
+        if workspace.has_sheet(sheet_name):
+            sheet = workspace.load_sheet(sheet_name)
         else:
             sheet = None
 
-        return cls(
-            address,
-            data_store.load_desc(address),
-            sheet,
-            _data_store=data_store,
-        )
+        return cls(address, workspace.load_desc(), sheet, _data_store=data_store)
 
     def store(self, data_store: DataStore):
         """Store the dataset, including files and sample sheet, in the data store."""
-        data_store.clean(self.address)
-        data_store.store_desc(self.address, self.desc)
+        workspace = data_store.workspace(self.address)
+        workspace.clean()
+        workspace.store_desc(self.desc)
         if self.sheet is not None:
-            data_store.store_sheet(self.address, self.sheet, "sheet")
+            workspace.store_sheet(self.sheet, "sheet")
         for file in self.data_files if self.data_files is not None else []:
-            data_store.store_file(
-                self.address,
+            workspace.store_file(
                 file,
                 file.name,
                 file_type=FileType.DATA,
             )
         for file in self.meta_files if self.meta_files is not None else []:
-            data_store.store_file(
-                self.address,
+            workspace.store_file(
                 file,
                 file.name,
                 file_type=FileType.META,

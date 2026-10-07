@@ -1,15 +1,16 @@
 import streamlit as st
 
+from srptn.common.access.store import AccessStore
 from srptn.common.accounts.policy import Actor
 from srptn.common.components.categories import category_editor
 from srptn.common.components.descriptions import desc_editor
 from srptn.common.components.entities import data_selector
 from srptn.common.components.ui_components import persistent_text_input
 from srptn.common.components.workflows import workflow_editor, workflow_selector
-from srptn.common.data import Address
+from srptn.common.data import Address, DataStore
 from srptn.common.data.entities.analysis import Analysis, WorkflowManager
 from srptn.common.data.entities.dataset import Dataset
-from srptn.common.data.fs import FSDataStore
+from srptn.common.data.fs import fs_data_store
 
 
 def store_analysis(
@@ -17,7 +18,7 @@ def store_analysis(
     desc: str,
     datasets: list[Dataset],
     workflow_manager: WorkflowManager,
-    data_store: FSDataStore,
+    data_store: DataStore,
 ):
     """Store the analysis."""
     valid = True
@@ -47,7 +48,8 @@ def store_analysis(
 
 
 def page_new_analysis(actor: Actor):
-    data_store = FSDataStore()
+    data_store = fs_data_store()
+    access = AccessStore(data_store)
 
     categories = category_editor("workflow-meta")
 
@@ -66,7 +68,7 @@ def page_new_analysis(actor: Actor):
     if render_continue:
         desc = desc_editor("workflow-meta")
 
-        datasets = data_selector(data_store, "workflow-meta-datasets")
+        datasets = data_selector(access, actor, "workflow-meta-datasets")
 
         if not categories or not analysis_name:
             render_continue = False
@@ -77,15 +79,13 @@ def page_new_analysis(actor: Actor):
 
     if workflow_manager is not None:
         workflow_editor(workflow_manager)
-        st.button(
+        if st.button(
             "Store",
             disabled=(not desc) or (not analysis_name),
-            on_click=store_analysis,
-            args=(
-                address,
-                desc,
-                datasets,
-                workflow_manager,
-                data_store,
-            ),
-        )
+        ):
+            # Re-check authority at the write itself (the page guard is not a
+            # substitute for an operation-level check).
+            if not access.can_run(actor, address):
+                st.error("You do not have permission to store this analysis.")
+                st.stop()
+            store_analysis(address, desc, datasets, workflow_manager, data_store)

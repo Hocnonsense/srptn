@@ -1,13 +1,25 @@
-import io
-from abc import ABC, abstractmethod
-from contextlib import AbstractContextManager
-from dataclasses import dataclass
-from datetime import datetime, timedelta
-from enum import Enum
-from typing import Callable, Iterable, Self, BinaryIO, TypeVar
-from pathlib import Path
+"""The entity model and the low-level data-store capability.
 
-import polars as pl
+``Address``, ``Entity`` and ``FileType`` are the backend-independent model.
+``DataStore`` is the low-level, backend-agnostic content capability (meta and
+files, read and write); it is not exposed to the application directly — the
+authorized ``AccessStore`` is.
+"""
+
+from __future__ import annotations
+
+import io
+
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from enum import Enum
+from typing import TYPE_CHECKING, BinaryIO, Self, TypeVar
+
+if TYPE_CHECKING:
+    import polars as pl
+
+    from ..accounts.policy import Actor
+    from .workspace import Workspace
 
 
 @dataclass
@@ -50,8 +62,8 @@ class Entity(ABC):
             raise ValueError(f"Address type must be '{self.__class__.__name__}'")
 
     @abstractmethod
-    def show(self) -> None:
-        """Abstract method to display entity information."""
+    def show(self, actor: "Actor", *, can_run: bool = False) -> None:
+        """Display the entity; ``can_run`` enables run/stop controls."""
         ...
 
     @classmethod
@@ -78,43 +90,21 @@ class FileType(Enum):
 
 
 E = TypeVar("E", bound=Entity)
-T = TypeVar("T")
 
 
-@dataclass(slots=True)
 class DataStore(ABC):
-    """Abstract base class for data stores."""
+    """Low-level content capability: entity meta and files, read and write.
+
+    Backend-agnostic and *not* exposed to the application.  The local
+    workspace is a filesystem-only capability reached through
+    :meth:`workspace`; the cache stays internal to the filesystem backend.
+    """
 
     @abstractmethod
-    def cache_entries(
-        self, owner: str | None = None, filter: Callable[[Path], T | None] = lambda x: x
-    ) -> Iterable[tuple[T, datetime]]:
-        """List undated cache entry directories without refreshing their timestamps."""
-        ...
+    def load_global_meta(self, name: str) -> bytes | None: ...
 
     @abstractmethod
-    def cache_access(
-        self, address: Address | str, timestamp: datetime | None = None, replace=False
-    ) -> AbstractContextManager[Path]:
-        """Create or locate a cache entry and exclusively use it until context exit.
-
-        Cleanup must skip active entries and replacement must refuse them.
-        Access fails immediately when a required lock is busy; never wait or retry.
-        Replacement of an Address also moves its entity data/meta into the entry.
-        Undated entries expire by last access; dated entries expire by timestamp.
-        Refresh the access marker on entry and exit, including failed uses.
-        The returned path is protected only for the duration of this context.
-        """
-        ...
-
-    def clean_cache(self, before: timedelta) -> None:
-        """Delete expired cache branches; before is their maximum age."""
-        raise NotImplementedError()
-
-    @abstractmethod
-    def clean(self, address: Address) -> None:
-        """Abstract method to clean data for a given address."""
-        ...
+    def store_global_meta(self, name: str, data: bytes) -> None: ...
 
     @abstractmethod
     def load_sheet(self, address: Address, sheet_name: str) -> pl.DataFrame:
@@ -187,17 +177,15 @@ class DataStore(ABC):
         self,
         entity_type: type[E],
         search_term: str | None = None,
-        only_owned_by: str | None = None,
-    ) -> list[E]:
-        """Abstract method to fetch entities from the data store."""
-        ...
+        *,
+        owned_by: str | None = None,
+    ) -> list[E]: ...
 
     @abstractmethod
-    def occupied(self, address: Address) -> bool:
+    def occupied(self, address: Address, only_check_meta: bool = False) -> bool:
         """Abstract method to check if the address is used by an Entity."""
         ...
 
     @abstractmethod
-    def files_path(self, address: Address, file_type: FileType) -> Path:
-        """Abstract method to get the path for files of a specific type."""
-        ...
+    def workspace(self, address: Address) -> Workspace:
+        """A locked local working directory for ``address`` (filesystem only)."""

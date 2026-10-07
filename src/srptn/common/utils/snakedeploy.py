@@ -7,12 +7,13 @@ import tempfile
 from contextlib import ExitStack, contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 from snakedeploy.deploy import WorkflowDeployer
 from snakedeploy.providers import Local, Provider, get_provider
 
-from ..data import DataStore
+if TYPE_CHECKING:
+    from ..data.fs import FSDataStore
 
 
 def _git(repo: Path, *args: str):
@@ -155,7 +156,7 @@ def export_commit(
 class CachedWorkflowManager:
     """Own repository caching, synchronization, version queries and deployment."""
 
-    def __init__(self, data_store: DataStore):
+    def __init__(self, data_store: "FSDataStore"):
         self.data_store = data_store
 
     def available_workflows(self):

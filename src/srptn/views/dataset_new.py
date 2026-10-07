@@ -7,12 +7,12 @@ from srptn.common.components.categories import category_editor
 from srptn.common.components.descriptions import desc_editor
 from srptn.common.data import Address
 from srptn.common.data.entities.dataset import Dataset
-from srptn.common.data.fs import FSDataStore
+from srptn.common.data.fs import fs_data_store
 from srptn.common.utils.polars_utils import load_data_table
 
 
 def page_new_dataset(actor: Actor):
-    data_store = FSDataStore()
+    data_store = fs_data_store()
 
     categories = category_editor("new_dataset-meta")
     dataset_name = st.text_input("Dataset name")

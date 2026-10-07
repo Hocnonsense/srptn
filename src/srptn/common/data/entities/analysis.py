@@ -7,6 +7,7 @@ import polars as pl
 import streamlit as st
 import yaml
 
+
 from ...components.logs import log_selector
 from ...tmux import TmuxSessionManager
 from ...utils.polars_utils import load_data_table, save_data_table
@@ -14,6 +15,7 @@ from ...utils.snakedeploy import CachedWorkflowManager
 from ...utils.yaml_utils import CustomSafeDumper, CustomSafeLoader
 from .. import Address, DataStore, Entity, FileType
 from ..entities.dataset import Dataset
+from ..workspace import Workspace
 
 
 @dataclass
@@ -23,14 +25,13 @@ class WorkflowManager:
     url: str
     tag: str | None
     branch: str | None
-    data_store: DataStore
-    address: Address
+    workspace: Workspace
     commit: str | None = None
 
     @classmethod
-    def load(cls, data_store: DataStore, address: Address):
+    def load(cls, workspace: Workspace):
         """Create a workflow instance from stored metadata."""
-        meta_path = data_store.files_path(address, FileType.META)
+        meta_path = workspace.meta_path
         with (meta_path / "details.yml").open("r") as file:
             details = yaml.safe_load(file)
         workflow_manager = cls(
@@ -38,29 +39,22 @@ class WorkflowManager:
             tag=details["tag"],
             branch=details["branch"],
             commit=details["commit"],
-            data_store=data_store,
-            address=address,
+            workspace=workspace,
         )
         workflow_manager.check()
         return workflow_manager
 
     def store(self):
         """Deploys the workflow and copies required files."""
-        self.data_store.clean(self.address)
-        self.data_path.mkdir(parents=True, exist_ok=True)
-        self.meta_path.mkdir(parents=True, exist_ok=True)
-        with CachedWorkflowManager(self.data_store).deployer(
-            self.url,
-            self.data_path,
-            commit=self.commit,
-        ) as wd:
-            wd.deploy(self.address.name)
-            schema_path = Path(wd.repo_clone) / "workflow" / "schemas"
-            if schema_path.exists():
-                shutil.copytree(
-                    schema_path,
-                    self.schema_dir,
-                )
+        self.workspace.clean()
+        with self.workspace as data_path:
+            with CachedWorkflowManager(self.workspace.store).deployer(
+                self.url, data_path, commit=self.commit
+            ) as wd:
+                wd.deploy(self.workspace.address.name)
+                schema_path = Path(wd.repo_clone) / "workflow" / "schemas"
+                if schema_path.exists():
+                    shutil.copytree(schema_path, self.schema_dir)
         self.check()
         self.export_metadata()
 
@@ -80,7 +74,7 @@ class WorkflowManager:
     @property
     def data_path(self):
         """Workflow data directory path."""
-        return self.data_store.files_path(self.address, FileType.DATA)
+        return self.workspace.data_path
 
     @property
     def log_path(self):
@@ -94,7 +88,7 @@ class WorkflowManager:
     @property
     def meta_path(self):
         """Metadata directory path."""
-        return self.data_store.files_path(self.address, FileType.META)
+        return self.workspace.meta_path
 
     @property
     def schema_dir(self):
@@ -195,14 +189,15 @@ class WorkflowManager:
 class AnalysisRuntimeManager:
     """Manages workflow execution in tmux sessions."""
 
-    def __init__(self, analysis_name: str):
+    def __init__(self, analysis_name: str, owner: str | None = None):
         self.analysis_name = analysis_name
         self.session_name = f"{analysis_name}_session"
         self.tmux_manager = TmuxSessionManager()
         self.output: str | None = None
+        self.owner = owner
 
     @st.dialog("Analysis Progress", width="large")
-    def show(self):
+    def show(self, actor, *, can_stop: bool = False):
         """Show analysis progress dialog & displays real-time output."""
         self.check_status()
 
@@ -218,7 +213,10 @@ class AnalysisRuntimeManager:
         if c1.button("Close", key=f"{self.analysis_name}-close"):
             st.rerun()
         if c2.button("Stop Analysis", key=f"{self.analysis_name}-stop"):
-            self.tmux_manager.close_session(self.session_name)
+            if can_stop:
+                self.tmux_manager.close_session(self.session_name)
+            else:
+                st.error("You do not have permission to stop this analysis.")
 
     def check_status(self) -> None:
         """Update stored analysis output from tmux session."""
@@ -241,7 +239,7 @@ class Analysis(Entity):
     workflow_manager: WorkflowManager
     analysis_run_manager: AnalysisRuntimeManager | None = None
 
-    def show(self):
+    def show(self, actor, *, can_run: bool = False):
         """Display analysis UI components."""
         if self.analysis_run_manager is None:
             self.analysis_run_manager = AnalysisRuntimeManager(str(self.address))
@@ -255,25 +253,28 @@ class Analysis(Entity):
                 with dataset_tab:
                     st.dataframe(dataset.sheet)
         with parent_tabs[1]:
-            log_selector(self.workflow_manager.data_store, self.address)
+            log_selector(self.workflow_manager)
 
         c1, c2 = st.columns([0.21, 0.79])
-        if c1.button("Run Analysis", key=f"{self.address.__str__}-run_button"):
+        if can_run and c1.button(
+            "Run Analysis", key=f"{self.address.__str__}-run_button"
+        ):
             command = f"cd {self.workflow_manager.data_path} && snakemake -c 2"
             self.analysis_run_manager.launch_analysis(command)
         if c2.button(
             "Check Status",
             key=f"{self.analysis_run_manager.analysis_name}-status_open",
         ):
-            self.analysis_run_manager.show()
+            self.analysis_run_manager.show(actor, can_stop=can_run)
 
     @classmethod
     def load(cls, data_store, address):
         """Create Analysis instance from stored data."""
-        desc = data_store.load_desc(address)
+        workspace = data_store.workspace(address)
+        desc = workspace.load_desc()
         inputs = (
-            data_store.load_sheet(address, "input").iter_rows(named=True)
-            if data_store.has_sheet(address, "input")
+            workspace.load_sheet("input").iter_rows(named=True)
+            if workspace.has_sheet("input")
             else []
         )
         datasets = []
@@ -282,19 +283,20 @@ class Analysis(Entity):
             datasets.append(
                 Dataset(
                     address=dataset_address,
-                    desc=data_store.load_desc(dataset_address),
-                    sheet=data_store.load_sheet(address, f"input/sheet-{i}"),
+                    desc=data_store.workspace(dataset_address).load_desc(),
+                    sheet=workspace.load_sheet(f"input/sheet-{i}"),
                     _data_store=data_store,
                 ),
             )
-        workflow_manager = WorkflowManager.load(data_store, address)
-        analysis_run_manager = AnalysisRuntimeManager(str(address))
+        workflow_manager = WorkflowManager.load(workspace)
+        analysis_run_manager = AnalysisRuntimeManager(str(address), owner=address.owner)
         return cls(address, desc, datasets, workflow_manager, analysis_run_manager)
 
     def store(self, data_store: DataStore):
         """Save analysis state to storage."""
         # FIXME: mixed data_store from .store and .load
-        data_store.store_desc(self.address, self.desc)
+        workspace = data_store.workspace(self.address)
+        workspace.store_desc(self.desc)
         dataset_entities = {}
         sheets = {}
         for dataset in self.datasets:
@@ -305,11 +307,9 @@ class Analysis(Entity):
                 ].to_list()
                 sheets[address] = dataset.sheet
         index = pl.DataFrame({"datasetid": list(sheets)})
-        data_store.store_sheet(self.address, index, "input")
+        workspace.store_sheet(index, "input")
         for position, row in enumerate(index.iter_rows(named=True)):
-            data_store.store_sheet(
-                self.address, sheets[row["datasetid"]], f"input/sheet-{position}"
-            )
+            workspace.store_sheet(sheets[row["datasetid"]], f"input/sheet-{position}")
 
         self.workflow_manager.update_configs_from_session_state()
         # FIXME: only update tables for 'workflow-config-*-data'
