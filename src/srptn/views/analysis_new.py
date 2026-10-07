@@ -1,7 +1,6 @@
 import streamlit as st
 
-from srptn.common.accounts.policy import Role
-from srptn.common.accounts.session import require_actor, require_role
+from srptn.common.accounts.policy import Actor
 from srptn.common.components.categories import category_editor
 from srptn.common.components.descriptions import desc_editor
 from srptn.common.components.entities import data_selector
@@ -11,36 +10,6 @@ from srptn.common.data import Address
 from srptn.common.data.entities.analysis import Analysis, WorkflowManager
 from srptn.common.data.entities.dataset import Dataset
 from srptn.common.data.fs import FSDataStore
-
-actor = require_actor()
-require_role(actor, Role.HOST)
-data_store = FSDataStore()
-
-categories = category_editor("workflow-meta")
-
-analysis_name = persistent_text_input(
-    "Analysis name",
-    "workflow-meta-name",
-    "Enter name",
-)
-
-render_continue = True
-address = Address(actor.id, Analysis, categories=categories, name=analysis_name)
-if data_store.occupied(address, only_check_meta=True):
-    st.error(f"Analysis {address} already exists")
-    render_continue = False
-
-if render_continue:
-    desc = desc_editor("workflow-meta")
-
-    datasets = data_selector(data_store, "workflow-meta-datasets")
-
-    if not categories or not analysis_name:
-        render_continue = False
-
-workflow_manager = workflow_selector(address, data_store)
-if not render_continue:
-    st.stop()
 
 
 def store_analysis(
@@ -77,17 +46,46 @@ def store_analysis(
         st.success(f"Stored analysis {address}")
 
 
-if workflow_manager is not None:
-    workflow_editor(workflow_manager)
-    st.button(
-        "Store",
-        disabled=(not desc) or (not analysis_name),
-        on_click=store_analysis,
-        args=(
-            address,
-            desc,
-            datasets,
-            workflow_manager,
-            data_store,
-        ),
+def page_new_analysis(actor: Actor):
+    data_store = FSDataStore()
+
+    categories = category_editor("workflow-meta")
+
+    analysis_name = persistent_text_input(
+        "Analysis name",
+        "workflow-meta-name",
+        "Enter name",
     )
+
+    render_continue = True
+    address = Address(actor.id, Analysis, categories=categories, name=analysis_name)
+    if data_store.occupied(address, only_check_meta=True):
+        st.error(f"Analysis {address} already exists")
+        render_continue = False
+
+    if render_continue:
+        desc = desc_editor("workflow-meta")
+
+        datasets = data_selector(data_store, "workflow-meta-datasets")
+
+        if not categories or not analysis_name:
+            render_continue = False
+
+    workflow_manager = workflow_selector(address, data_store)
+    if not render_continue:
+        st.stop()
+
+    if workflow_manager is not None:
+        workflow_editor(workflow_manager)
+        st.button(
+            "Store",
+            disabled=(not desc) or (not analysis_name),
+            on_click=store_analysis,
+            args=(
+                address,
+                desc,
+                datasets,
+                workflow_manager,
+                data_store,
+            ),
+        )

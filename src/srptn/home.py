@@ -1,6 +1,5 @@
 import streamlit as st
 
-from srptn.common.accounts.policy import Role
 from srptn.common.accounts.session import (
     account_service,
     change_password_form,
@@ -10,6 +9,7 @@ from srptn.common.accounts.session import (
     logout,
     register_form,
 )
+from srptn.views import visible_pages
 
 st.set_page_config(page_title="SRPTN")
 
@@ -39,7 +39,7 @@ else:
             # Unreachable via the authenticated navigation, but a session can
             # end mid-run; report it instead of raising an AssertionError.
             st.error("Your session has ended. Please log in again.")
-            logout()
+            logout(revoked=True)
             st.stop()
         st.title(f"Hello, {actor.role.label} {actor.id}!")
         change_password_form(service, session)
@@ -47,19 +47,7 @@ else:
             logout()
             st.rerun()
 
-    entries = [
-        ("views/dataset_new.py", "New Dataset", Role.HOST),
-        ("views/datasets.py", "Datasets", Role.VISITOR),
-        ("views/analysis_new.py", "New Analysis", Role.HOST),
-        ("views/analyses.py", "Analyses", Role.VISITOR),
-        ("views/5 Notebook (Mockup).py", "Notebook (Mockup)", Role.VISITOR),
-        ("views/6 Compose Figure (Mockup).py", "Compose Figure (Mockup)", Role.VISITOR),
-        (account_page, "Account", None),
-    ]
-    navigation = [
-        st.Page(page, title=title)
-        for page, title, role in entries
-        if actor.role.permitted(role)
-    ]
+    navigation = [*visible_pages(actor)]
+    navigation.append(st.Page(account_page, title="Account"))
 
 st.navigation(navigation).run()

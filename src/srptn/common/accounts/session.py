@@ -10,7 +10,6 @@ session keys.
 import streamlit as st
 
 from .models import Account, Session
-from .policy import Actor, Role
 from .service import AccountService
 from .settings import resolve_database_path
 
@@ -45,20 +44,17 @@ def client_ip():
     return forwarded.split(",")[0].strip()
 
 
-def _revoke():
+def logout(*, revoked: bool = False):
     """End the session and clear all business/UI state.
 
-    Clearing everything (not just the session keys) matters: otherwise a
-    later login in the same browser session can see the previous account's
-    drafts and workflow configuration.
+    Everything is cleared, not just the session keys: otherwise a later login
+    in the same browser session could see the previous account's drafts and
+    workflow configuration.  Set ``revoked`` for an involuntary end (password
+    or role change, disable) to show a notice on the login page.
     """
     st.session_state.clear()
-    st.session_state[_REVOKED_KEY] = True
-
-
-def logout():
-    """End the session and clear all account drafts and UI state."""
-    st.session_state.clear()
+    if revoked:
+        st.session_state[_REVOKED_KEY] = True
 
 
 def current_account(service: AccountService):
@@ -72,7 +68,7 @@ def current_account(service: AccountService):
         return None
     account = service.get_account(session.id)
     if account is None or not account.is_active or account.version != session.version:
-        _revoke()
+        logout(revoked=True)
         return None
     st.session_state[_ACTOR_KEY] = account.actor()
     return account
@@ -164,7 +160,7 @@ def change_password_form(service: AccountService, session: Session):
         account = service.change_password(session, current, new)
     except (Account.NotFound, Account.EditConflict):
         # The account is gone or was changed elsewhere; the session is stale.
-        _revoke()
+        logout(revoked=True)
         st.rerun()
     except ValueError as exc:
         st.error(str(exc))
@@ -172,28 +168,3 @@ def change_password_form(service: AccountService, session: Session):
     # Keep the current session logged in with the bumped version.
     st.session_state[_SESSION_KEY] = account.session()
     st.success("Password changed. Use the new password next time.")
-
-
-def require_actor():
-    """Return the actor cached by the entrypoint, or stop the page.
-
-    Pages run only through the navigation entrypoint, which validates the
-    session and caches the actor; an absent actor means the page was reached
-    without authentication.
-    """
-    actor: Actor | None = st.session_state.get(_ACTOR_KEY)
-    if actor is None:
-        st.error("Not authenticated")
-        st.stop()
-    return actor
-
-
-def require_role(actor: Actor, minimum: Role):
-    """Stop the page unless the actor's role is at least ``minimum``.
-
-    This is the server-side gate that also covers direct access to a page;
-    hiding a page from the navigation only affects convenience.
-    """
-    if actor.role < minimum:
-        st.error("You do not have permission to view this page.")
-        st.stop()
