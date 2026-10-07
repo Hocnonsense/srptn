@@ -8,7 +8,7 @@ from pathlib import Path
 
 import polars as pl
 
-from srptn.common.data import Address, DataStore, Entity, FileType
+from . import Address, DataStore, Entity, FileType
 
 
 @dataclass(slots=True)
