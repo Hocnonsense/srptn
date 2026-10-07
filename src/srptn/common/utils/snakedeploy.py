@@ -61,7 +61,7 @@ class RepoRefs(NamedTuple):
     head: str
 
     @property
-    def default_commit(self) -> str:
+    def default_commit(self):
         """Prefer the newest tagged commit, then the newest commit."""
         if self.tags:
             return next(iter(self.tags.values()))

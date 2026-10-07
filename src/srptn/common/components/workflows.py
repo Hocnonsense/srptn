@@ -1,14 +1,16 @@
-import streamlit as st
 import subprocess
+from typing import NamedTuple
+
+import streamlit as st
 from snakedeploy.exceptions import UserError
 
-from ..utils.snakedeploy import CachedWorkflowManager
+from ..data import Address
+from ..data.entities.analysis import Analysis, WorkflowManager
+from ..data.fs import FSDataStore
+from ..utils.snakedeploy import CachedWorkflowManager, RepoRefs
 from .config_editor import ace_config_editor, config_editor
 from .schemas import infer_schema, update_schema
 from .ui_components import persistent_text_input
-from ..data import Address
-from ..data.fs import FSDataStore
-from ..data.entities.analysis import Analysis, WorkflowManager
 
 auto_open_script = """
 <script>(() => {
@@ -42,6 +44,31 @@ auto_open_script = """
 </script>
 """
 
+_DEFAULT_REPOSITORY = "https://github.com/snakemake-workflows/rna-seq-kallisto-sleuth"
+_REPOSITORY_URL_LABEL = (
+    f"Workflow repository URL (e.g. {_DEFAULT_REPOSITORY}, you can also explore from "
+    "the [catalog](https://snakemake.github.io/snakemake-workflow-catalog/docs/all_standardized_workflows.html))"
+)
+
+_META_LABELS = {f"workflow-meta-{i.lower()}": i for i in ("Tag", "Branch", "Commit")}
+_PICKER = "workflow-meta-picker"
+_SIGNATURE = "workflow-meta-refs-signature"
+
+_SELECTED_MANAGER = "workflow-selected-manager"
+_SELECTED_VERSION = "workflow-selected-version"
+
+
+class Version(NamedTuple):
+    """A repository and the Git refs that pin a workflow deployment."""
+
+    url: str
+    tag: str | None = None
+    branch: str | None = None
+    commit: str | None = None
+
+    def selection(self, address: Address):
+        return self.url, self.commit, str(address)
+
 
 def workflow_selector(
     access,
@@ -52,48 +79,35 @@ def workflow_selector(
     desc=None,
     datasets=None,
 ):
-    """Select a cached or fetched repository and Git refs and confirmed commit hashes."""
+    """Pick a repository/version, deploy it on demand and return its manager."""
     cached = CachedWorkflowManager(data_store)
-    selected = _select_workflow(cached)
-    if selected is None:
+    version = _select_version(cached)
+    if version is None:
         return None
-    url, tag, branch, commit = selected
-    selection = (url, commit, str(address))
     if st.button("Deploy", key="workflow-meta-deploy"):
-        return _selected_workflow(
-            cached,
-            access,
-            actor,
-            address,
-            url,
-            tag,
-            branch,
-            commit,
-            desc=desc,
-            datasets=datasets,
+        return _deploy(
+            cached, access, actor, address, version, desc=desc, datasets=datasets
         )
-    if st.session_state.get("workflow-selected-version") == selection:
-        return st.session_state.get("workflow-selected-manager")
+    if st.session_state.get(_SELECTED_VERSION) == version.selection(address):
+        return st.session_state.get(_SELECTED_MANAGER)
 
 
-def _select_workflow(cached: CachedWorkflowManager):
+def _select_repository(cached: CachedWorkflowManager) -> str | None:
+    """Render the cached/external repository picker and return the chosen URL."""
     repositories = list(cached.available_workflows())
-    pending_source = st.session_state.pop("workflow-meta-pending-source", None)
-    if pending_source in repositories:
-        st.session_state["workflow-meta-source"] = pending_source
-    external = "Enter URL in text box"
+    pending = st.session_state.pop("workflow-meta-pending-source", None)
+    if pending in repositories:
+        st.session_state["workflow-meta-source"] = pending
+
+    PROMPT_TEXT_INPUT = "Enter URL in text box"
     source = st.selectbox(
         "Select workflow repository",
-        [*repositories, external],
+        [*repositories, PROMPT_TEXT_INPUT],
         key="workflow-meta-source",
     )
-    if source == external:
+    if source == PROMPT_TEXT_INPUT:
         url = persistent_text_input(
-            "Workflow repository URL (e.g. https://github.com/snakemake-workflows/rna-seq-kallisto-sleuth, "
-            "you can also explore from "
-            "the [catalog](https://snakemake.github.io/snakemake-workflow-catalog/docs/all_standardized_workflows.html))",
-            "workflow-meta-url",
-            "https://github.com/snakemake-workflows/rna-seq-kallisto-sleuth",
+            _REPOSITORY_URL_LABEL, "workflow-meta-url", _DEFAULT_REPOSITORY
         ).strip()
         if url and url not in repositories:
             cached.read_workflow_refs(url)
@@ -102,211 +116,231 @@ def _select_workflow(cached: CachedWorkflowManager):
                 st.rerun()
     else:
         url = source
+
     if not url:
         st.info("Select a cached workflow or enter a repository URL.")
         return None
+    return url
 
-    refs_key = f"workflow-refs:{url}"
+
+def _read_refs(cached: CachedWorkflowManager, url: str) -> RepoRefs | None:
+    """Return the cached Git refs for ``url`` (None for a plain local directory)."""
+    key = f"workflow-refs:{url}"
+    if key not in st.session_state:
+        st.session_state[key] = cached.read_workflow_refs(url)
+    return st.session_state[key]
+
+
+def _select_version(cached: CachedWorkflowManager):
+    """Render the repository and version controls and return the pending version."""
+    url = _select_repository(cached)
+    if url is None:
+        return None
     try:
-        if refs_key not in st.session_state:
-            refs = st.session_state[refs_key] = cached.read_workflow_refs(url)
-        else:
-            refs = st.session_state[refs_key]
+        refs = _read_refs(cached, url)
     except BaseException as error:
         st.error(f"Failed to read workflow versions: {error}")
         return None
-    tag_key, branch_key, commit_key = [
-        f"workflow-meta-{i}" for i in ("tag", "branch", "commit")
-    ]
     if refs is None:
-        tag = branch = commit = None
         st.caption("Local workflow directory")
+        return Version(url)
+    if not refs.commits:
+        st.info("This Git repository contains no commits.")
+        return None
+    return Version(url, *_version_picker(cached, url, refs))
+
+
+def _reset_unless_current(url: str, refs: RepoRefs):
+    """Seed default tag/branch/commit unless they already match these refs."""
+    signature = (
+        url,
+        refs.head,
+        tuple(refs.commits),
+        tuple(refs.tags.items()),
+        tuple(refs.branches.items()),
+    )
+    if st.session_state.get(_SIGNATURE) == signature and all(
+        key in st.session_state for key in _META_LABELS
+    ):
+        return
+
+    commit = refs.default_commit
+    tag = next((name for name, sha in refs.tags.items() if sha == commit), None)
+    branch = (
+        next((name for name, sha in refs.branches.items() if sha == commit), None)
+        if tag is None
+        else None
+    )
+    st.session_state.update(zip(_META_LABELS, (tag, branch, commit)))
+    st.session_state[_SIGNATURE] = signature
+
+
+def _version_picker(cached: CachedWorkflowManager, url: str, refs: RepoRefs):
+    """Render the tag/branch/commit row and its picker; return the chosen refs."""
+    _reset_unless_current(url, refs)
+    _render_version_row(cached, url, refs)
+    _render_picker(refs)
+
+    error = st.session_state.pop("workflow-meta-fetch-error", None)
+    if error is not None:
+        st.error(f"Failed to fetch workflow versions: {error}")
+    return tuple(st.session_state[key] for key in _META_LABELS)
+
+
+def _refresh_refs(cached: CachedWorkflowManager, url: str):
+    try:
+        st.session_state[f"workflow-refs:{url}"] = cached.read_workflow_refs(
+            url, refresh=True
+        )
+        st.session_state[_PICKER] = None
+    except BaseException as error:
+        st.session_state["workflow-meta-fetch-error"] = str(error)
+
+
+def _render_version_row(cached: CachedWorkflowManager, url: str, refs):
+    """Render the Tag/Branch/Commit buttons and the refresh control."""
+    tag, branch, commit = (st.session_state[key] for key in _META_LABELS)
+    commit_label = _commit_label(refs, commit)
+    fields = zip(_META_LABELS, (tag, branch, commit_label))
+    with st.container(key="workflow-version-row"):
+        columns = st.columns(
+            [4 if tag is not None else 0.6, 4 if branch is not None else 0.6, 6, 1],
+            vertical_alignment="center",
+        )
+        for index, (key, value) in enumerate(fields):
+            with columns[index]:
+                st.button(
+                    f"{value} ▾" if value is not None else "▾",
+                    key=f"{key}-open",
+                    help=_META_LABELS[key],
+                    use_container_width=True,
+                    on_click=_toggle_picker,
+                    args=(key,),
+                )
+        with columns[3]:
+            st.button(
+                "↻",
+                key="workflow-meta-fetch",
+                on_click=_refresh_refs,
+                args=(cached, url),
+            )
+
+
+def _render_picker(refs: RepoRefs):
+    """Render the native selectbox for the currently open ref kind."""
+    picker = st.session_state.get(_PICKER)
+    if picker not in _META_LABELS:
+        return
+
+    label = _META_LABELS[picker]
+    names = {"Tag": refs.tags, "Branch": refs.branches}.get(label)
+    widget_key = f"{picker}-picker"
+    st.session_state[widget_key] = None
+    with st.container(key="workflow-version-picker"):
+        st.selectbox(
+            label,
+            list(refs.commits) if names is None else list(names),
+            index=None,
+            key=widget_key,
+            placeholder=f"Select a {label.lower()}",
+            format_func=lambda value: _version_label(refs, value, names),
+            on_change=_select_ref,
+            args=(picker, names),
+        )
+    st.html(auto_open_script, unsafe_allow_javascript=True)
+
+
+def _toggle_picker(key: str):
+    current = st.session_state.get(_PICKER)
+    st.session_state[_PICKER] = None if current == key else key
+
+
+def _select_ref(picker: str, names: dict[str, str] | None):
+    st.session_state[_PICKER] = None
+    value = st.session_state[f"{picker}-picker"]
+    if value is None:
+        return
+    if names is None:
+        values = None, None, value
     else:
-        if not refs.commits:
-            st.info("This Git repository contains no commits.")
-            return None
-        signature = (
-            url,
-            refs.head,
-            tuple(refs.commits),
-            tuple(refs.tags.items()),
-            tuple(refs.branches.items()),
+        values = (
+            (value, None, names[value])
+            if _META_LABELS[picker] == "Tag"
+            else (None, value, names[value])
         )
-        if st.session_state.get("workflow-meta-refs-signature") != signature or any(
-            key not in st.session_state for key in (tag_key, branch_key, commit_key)
-        ):
-            commit = refs.default_commit
-            tag = next((name for name, sha in refs.tags.items() if sha == commit), None)
-            branch = (
-                next(
-                    (name for name, sha in refs.branches.items() if sha == commit), None
-                )
-                if tag is None
-                else None
-            )
-            st.session_state.update(
-                {
-                    tag_key: tag,
-                    branch_key: branch,
-                    commit_key: commit,
-                    "workflow-meta-refs-signature": signature,
-                }
-            )
-
-        picker_key = "workflow-meta-picker"
-
-        def toggle_picker(key):
-            st.session_state[picker_key] = (
-                None if st.session_state.get(picker_key) == key else key
-            )
-
-        def select_version(key, values):
-            value = st.session_state[f"{key}-picker"]
-            if key == commit_key:
-                st.session_state[commit_key] = value
-                st.session_state[tag_key] = None
-                st.session_state[branch_key] = None
-            else:
-                st.session_state[key] = value
-                if value is not None:
-                    st.session_state[commit_key] = values[value]
-                    other = branch_key if key == tag_key else tag_key
-                    st.session_state[other] = None
-            st.session_state[picker_key] = None
-
-        def refresh_refs():
-            try:
-                st.session_state[refs_key] = cached.read_workflow_refs(
-                    url, refresh=True
-                )
-                st.session_state[picker_key] = None
-            except BaseException as error:
-                st.session_state["workflow-meta-fetch-error"] = str(error)
-
-        def version_label(sha, name=None):
-            subject, date = refs.commits[sha]
-            date_str = f"{date:%Y-%m-%d %H:%M UTC}"
-            if name is None:
-                return f"{sha[:12]} · {date_str} · {subject}"
-            return f"{name} · {subject} · {date_str}"
-
-        tag, branch, commit = (
-            st.session_state[key] for key in (tag_key, branch_key, commit_key)
-        )
-        with st.container(key="workflow-version-row"):
-            columns = st.columns(
-                [
-                    4 if tag is not None else 0.6,
-                    4 if branch is not None else 0.6,
-                    6,
-                    1,
-                ],
-                vertical_alignment="center",
-            )
-            for column, label, key, value in (
-                (columns[0], "Tag", tag_key, tag),
-                (columns[1], "Branch", branch_key, branch),
-                (
-                    columns[2],
-                    "Commit",
-                    commit_key,
-                    f"{commit[:12]} · {refs.commits[commit][1]:%Y-%m-%d %H:%M UTC}",
-                ),
-            ):
-                with column:
-                    st.button(
-                        f"{value} ▾" if value is not None else "▾",
-                        key=f"{key}-open",
-                        help=label,
-                        use_container_width=True,
-                        on_click=toggle_picker,
-                        args=(key,),
-                    )
-            with columns[3]:
-                st.button("↻", key="workflow-meta-fetch", on_click=refresh_refs)
-
-        picker = st.session_state.get(picker_key)
-        if picker in (tag_key, branch_key, commit_key):
-            label = {tag_key: "Tag", branch_key: "Branch", commit_key: "Commit"}[picker]
-            values = {tag_key: refs.tags, branch_key: refs.branches}.get(picker)
-            widget_key = f"{picker}-picker"
-            st.session_state[widget_key] = None
-            with st.container(key="workflow-version-picker"):
-                st.selectbox(
-                    label,
-                    list(refs.commits) if values is None else list(values),
-                    index=None,
-                    key=widget_key,
-                    placeholder=f"Select a {label.lower()}",
-                    format_func=lambda value: (
-                        version_label(value)
-                        if values is None
-                        else version_label(values[value], value)
-                    ),
-                    on_change=select_version,
-                    args=(picker, values),
-                )
-            st.html(auto_open_script, unsafe_allow_javascript=True)
-        fetch_error = st.session_state.pop("workflow-meta-fetch-error", None)
-        if fetch_error is not None:
-            st.error(f"Failed to fetch workflow versions: {fetch_error}")
-        tag, branch, commit = (
-            st.session_state[key] for key in (tag_key, branch_key, commit_key)
-        )
-    return url, tag, branch, commit
+    st.session_state.update(zip(_META_LABELS, values))
 
 
-def _selected_workflow(
+def _commit_label(refs: RepoRefs, commit: str):
+    _, date = refs.commits[commit]
+    return f"{commit[:12]} · {date:%Y-%m-%d %H:%M UTC}"
+
+
+def _version_label(refs, value: str, names: dict | None) -> str:
+    """Format a commit (``names`` is None) or a named tag/branch reference."""
+    if names is None:
+        subject, date = refs.commits[value]
+        return f"{value[:12]} · {date:%Y-%m-%d %H:%M UTC} · {subject}"
+    subject, date = refs.commits[names[value]]
+    return f"{value} · {subject} · {date:%Y-%m-%d %H:%M UTC}"
+
+
+def _deploy(
     cached: CachedWorkflowManager,
     access,
     actor,
     address: Address,
-    url: str,
-    tag,
-    branch,
-    commit: str | None,
+    version: Version,
     *,
     desc=None,
     datasets=None,
 ):
-    if commit is None and (tag is not None or branch is not None):
+    """Resolve the commit, deploy it into the workspace and persist the analysis."""
+    commit = version.commit
+    if commit is None and (version.tag is not None or version.branch is not None):
         try:
-            commit = cached.resolve_ref(url, tag=tag, branch=branch)
+            commit = cached.resolve_ref(
+                version.url, tag=version.tag, branch=version.branch
+            )
         except (OSError, subprocess.CalledProcessError, UserError, ValueError) as error:
             st.error(f"Failed to resolve workflow version: {error}")
             return None
-    selection = (url, commit, str(address))
-    if st.session_state.get("workflow-selected-version") != selection:
-        for key in list(st.session_state):
-            if isinstance(key, str) and key.startswith("workflow-config-"):
-                del st.session_state[key]
-        workspace = access.workspace(actor, address)
-        try:
-            with workspace as data_path:
-                cached.deploy(data_path, address.name, url, commit=commit)
-            manager = WorkflowManager(url, tag, branch, workspace, commit=commit)
-            manager.check()
-            manager.export_metadata()
-            if desc is not None:
-                # A successful deploy also persists the analysis (description and
-                # inputs), so it never leaves an occupied-but-empty address.
-                Analysis(address, desc, datasets or [], manager).write_entity(workspace)
-        except (
-            OSError,
-            subprocess.CalledProcessError,
-            UserError,
-            ValueError,
-            RuntimeError,
-        ) as error:
-            workspace.clean()
-            st.error(f"Failed to deploy workflow: {error}")
-            return None
-        except BaseException:
-            workspace.clean()
-            raise
-        st.session_state["workflow-selected-manager"] = manager
-        st.session_state["workflow-selected-version"] = selection
-    return st.session_state["workflow-selected-manager"]
+    selection = version.selection(address)
+    if st.session_state.get(_SELECTED_VERSION) == selection:
+        return st.session_state[_SELECTED_MANAGER]
+
+    for key in list(st.session_state):
+        if isinstance(key, str) and key.startswith("workflow-config-"):
+            del st.session_state[key]
+    workspace = access.workspace(actor, address)
+    try:
+        with workspace as data_path:
+            cached.deploy(data_path, address.name, version.url, commit=commit)
+        manager = WorkflowManager(
+            version.url, version.tag, version.branch, workspace, commit=commit
+        )
+        manager.check()
+        manager.export_metadata()
+        if desc is not None:
+            # A successful deploy also persists the analysis (description and
+            # inputs), so it never leaves an occupied-but-empty address.
+            Analysis(address, desc, datasets or [], manager).write_entity(workspace)
+    except (
+        OSError,
+        subprocess.CalledProcessError,
+        UserError,
+        ValueError,
+        RuntimeError,
+    ) as error:
+        workspace.clean()
+        st.error(f"Failed to deploy workflow: {error}")
+        return None
+    except BaseException:
+        workspace.clean()
+        raise
+    st.session_state[_SELECTED_MANAGER] = manager
+    st.session_state[_SELECTED_VERSION] = selection
+    return manager
 
 
 def workflow_editor(workflow_manager: WorkflowManager):
