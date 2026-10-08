@@ -11,7 +11,7 @@ before rendering) or a path to a script page.
 
 import functools
 from collections.abc import Callable
-from typing import NamedTuple
+from typing import NamedTuple, Any
 
 import streamlit as st
 
@@ -41,6 +41,15 @@ class PageInfo(NamedTuple):
 
         return render
 
+    @classmethod
+    def wrap(cls, title: str, min_role: Role | None = None):
+        """Return a decorator turning a page function into a :class:`PageInfo`."""
+
+        def decorator(func: Callable[[Actor], Any]) -> "PageInfo":
+            return cls(func, title, min_role)
+
+        return decorator
+
 
 def visible_pages(actor: Actor):
     """The pages ``actor`` may see in the navigation."""
@@ -50,15 +59,14 @@ def visible_pages(actor: Actor):
     from .datasets import page_datasets
     from .workflow_new import page_new_workflow
 
-    PAGES = (
-        PageInfo(page_new_dataset, "New Dataset", Role.HOST),
-        PageInfo(page_datasets, "Datasets", None),
-        PageInfo(page_new_workflow, "New Workflow", Role.PUBLISHER),
-        PageInfo(page_new_analysis, "New Analysis", Role.HOST),
-        PageInfo(page_analyses, "Analyses", None),
+    for page in (
+        page_new_dataset,
+        page_datasets,
+        page_new_workflow,
+        page_new_analysis,
+        page_analyses,
         PageInfo("views/5 Notebook (Mockup).py", "Notebook (Mockup)", None),
         PageInfo("views/6 Compose Figure (Mockup).py", "Compose Figure (Mockup)", None),
-    )
-    for page in PAGES:
+    ):
         if page.permitted(actor):
             yield st.Page(page.page(actor), title=page.title)

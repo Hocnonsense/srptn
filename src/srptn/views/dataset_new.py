@@ -2,15 +2,17 @@ import polars as pl
 import polars.selectors as cs
 import streamlit as st
 
-from srptn.common.accounts.policy import Actor
+from srptn.common.accounts.policy import Actor, Role
 from srptn.common.components.categories import category_editor
 from srptn.common.components.descriptions import desc_editor
 from srptn.common.data import Address
 from srptn.common.data.entities.dataset import Dataset
 from srptn.common.data.fs import fs_data_store
 from srptn.common.utils.polars_utils import load_data_table
+from srptn.views import PageInfo
 
 
+@PageInfo.wrap("New Dataset", Role.HOST)
 def page_new_dataset(actor: Actor):
     data_store = fs_data_store()
 

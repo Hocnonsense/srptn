@@ -1,7 +1,7 @@
 import streamlit as st
 
 from srptn.common.access.store import AccessStore
-from srptn.common.accounts.policy import Actor
+from srptn.common.accounts.policy import Actor, Role
 from srptn.common.components.categories import category_editor
 from srptn.common.components.descriptions import desc_editor
 from srptn.common.components.entities import data_selector
@@ -11,6 +11,7 @@ from srptn.common.data import Address, DataStore
 from srptn.common.data.entities.analysis import Analysis, WorkflowManager
 from srptn.common.data.entities.dataset import Dataset
 from srptn.common.data.fs import fs_data_store
+from srptn.views import PageInfo
 
 
 def store_analysis(
@@ -47,6 +48,7 @@ def store_analysis(
         st.success(f"Stored analysis {address}")
 
 
+@PageInfo.wrap("New Analysis", Role.HOST)
 def page_new_analysis(actor: Actor):
     data_store = fs_data_store()
     access = AccessStore(data_store)

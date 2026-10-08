@@ -2,7 +2,7 @@ import streamlit as st
 import yaml
 
 from srptn.common.access.store import AccessStore
-from srptn.common.accounts.policy import Actor
+from srptn.common.accounts.policy import Actor, Role
 from srptn.common.components.categories import category_editor
 from srptn.common.components.descriptions import desc_editor
 from srptn.common.components.schemas import infer_schema
@@ -19,6 +19,7 @@ from srptn.common.data.fs import fs_data_store
 from srptn.common.utils.snakedeploy import CachedWorkflowManager
 from srptn.common.utils.workflow_curation import load_yaml
 from srptn.common.utils.yaml_utils import CustomSafeDumper
+from srptn.views import PageInfo
 
 _KEY = "publish-workflow"
 
@@ -50,6 +51,7 @@ def _deploy_upstream(
     st.session_state[f"{_KEY}-run"] = st.session_state.get(f"{_KEY}-run", 0) + 1
 
 
+@PageInfo.wrap("New Workflow", Role.PUBLISHER)
 def page_new_workflow(actor: Actor):
     """Curate and publish a Workflow entity from a pinned upstream repository."""
     data_store = fs_data_store()
@@ -68,9 +70,7 @@ def page_new_workflow(actor: Actor):
 
     address = Address(actor.id, Workflow, categories=categories, name=name)
     context: DeployInitialState | None = st.session_state.get(f"{_KEY}-context")
-    if data_store.occupied(address) and (
-        context is None or context.address != str(address)
-    ):
+    if data_store.occupied(address) and (context is None or context.address != address):
         st.error(f"Workflow {address} already exists")
         st.stop()
 
