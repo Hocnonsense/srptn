@@ -193,7 +193,7 @@ class DataStore(ABC):
 
     @abstractmethod
     def occupied(self, address: Address, only_check_meta: bool = False) -> bool:
-        """Abstract method to check if the address is used by an Entity."""
+        """Check address occupancy, ignoring draft data when only_check_meta is true."""
         ...
 
     @abstractmethod

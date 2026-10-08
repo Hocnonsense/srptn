@@ -250,9 +250,9 @@ class FSDataStore(DataStore):
         or if it is inside any of the data store's file types.
         """
         if not only_check_meta:
-            if self.desc_path(address).exists():
+            if self.files_path(address, FileType.DATA).exists():
                 return True
-        if self.files_path(address, FileType.DATA).exists():
+        if self.desc_path(address).exists():
             return True
         for parent in self.files_path(address, FileType.META).parents:
             if (parent / "desc.md").exists():

@@ -24,8 +24,20 @@ def ace_config_editor(
     :param workflow_manager: An object providing data-related functions.
     """
     value = st_ace(yaml.dump(config, sort_keys=False), language="yaml")
+    try:
+        parsed_config = (
+            None if value is None else yaml.load(value, Loader=CustomSafeLoader)
+        )
+    except yaml.YAMLError as error:
+        st.error(f"Error parsing config YAML: {error}")
+        return
+    if parsed_config is None:
+        parsed_config = {}
+    if not isinstance(parsed_config, dict):
+        st.error("Workflow configuration must be a YAML mapping.")
+        return
     create_form(
-        yaml.load(value, Loader=CustomSafeLoader),
+        parsed_config,
         final_schema,
         workflow_manager,
         "workflow-config-",
@@ -70,6 +82,8 @@ def create_form(
         if not isinstance(value, dict):  # check for leaf nodes = endpoints
             unique_element_id = update_key(parent_key, key)
             input_dict = schema[prop_key].get(key)
+            if not input_dict:
+                continue
             only_validation = ace_editor and not (
                 input_dict["type"] == "string"
                 and value

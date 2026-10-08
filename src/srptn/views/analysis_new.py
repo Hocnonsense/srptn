@@ -77,15 +77,12 @@ def page_new_analysis(actor: Actor):
         st.stop()
 
     workflow_manager = workflow_selector(
-        access, actor, address, data_store, desc=desc, datasets=datasets
+        access, actor, address, data_store
     )
 
     if workflow_manager is not None:
         workflow_editor(workflow_manager)
-        if st.button(
-            "Store",
-            disabled=(not desc) or (not analysis_name),
-        ):
+        if st.button("Store", disabled=(not desc) or (not analysis_name)):
             # Re-check authority at the write itself (the page guard is not a
             # substitute for an operation-level check).
             if not access.can_run(actor, address):
