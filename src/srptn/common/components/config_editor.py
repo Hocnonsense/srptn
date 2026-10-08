@@ -76,7 +76,7 @@ def create_form(
     :param ace_editor: Whether the form is used with the ACE editor, defaults to False.
     """
     prop_key = get_property_type(schema)
-    required_fields = bool(schema.get("required"))
+    required_fields = schema.get("required", [])
     new_tabs = []
     for key, value in config.items():
         if not isinstance(value, dict):  # check for leaf nodes = endpoints
@@ -96,7 +96,7 @@ def create_form(
                 input_dict,
                 unique_element_id,
                 workflow_manager,
-                required=required_fields and key in required_fields,
+                required=key in required_fields,
                 ace_editor=only_validation,
             )
         else:
