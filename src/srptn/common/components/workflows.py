@@ -4,6 +4,8 @@ from typing import NamedTuple
 import streamlit as st
 from snakedeploy.exceptions import UserError
 
+from ..access.store import AccessStore
+from ..accounts.policy import Actor
 from ..data import Address
 from ..data.entities.analysis import Analysis, WorkflowManager
 from ..data.fs import FSDataStore
@@ -71,8 +73,8 @@ class Version(NamedTuple):
 
 
 def workflow_selector(
-    access,
-    actor,
+    access: AccessStore,
+    actor: Actor,
     address: Address,
     data_store: FSDataStore,
     *,
@@ -92,7 +94,7 @@ def workflow_selector(
         return st.session_state.get(_SELECTED_MANAGER)
 
 
-def _select_repository(cached: CachedWorkflowManager) -> str | None:
+def _select_repository(cached: CachedWorkflowManager):
     """Render the cached/external repository picker and return the chosen URL."""
     repositories = list(cached.available_workflows())
     pending = st.session_state.pop("workflow-meta-pending-source", None)
@@ -276,7 +278,7 @@ def _commit_label(refs: RepoRefs, commit: str):
     return f"{commit[:12]} · {date:%Y-%m-%d %H:%M UTC}"
 
 
-def _version_label(refs, value: str, names: dict | None) -> str:
+def _version_label(refs: RepoRefs, value: str, names: dict | None) -> str:
     """Format a commit (``names`` is None) or a named tag/branch reference."""
     if names is None:
         subject, date = refs.commits[value]
@@ -287,8 +289,8 @@ def _version_label(refs, value: str, names: dict | None) -> str:
 
 def _deploy(
     cached: CachedWorkflowManager,
-    access,
-    actor,
+    access: AccessStore,
+    actor: Actor,
     address: Address,
     version: Version,
     *,
