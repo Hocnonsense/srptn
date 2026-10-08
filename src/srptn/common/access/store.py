@@ -60,6 +60,10 @@ class AccessStore:
         """Only the owner with a workflow-operator role may run/stop."""
         return address.owner == actor.id and actor.role >= Role.HOST
 
+    def can_write(self, actor: Actor, address: Address):
+        """Only the owner with a workflow-publisher role may write."""
+        return address.owner == actor.id and actor.role >= Role.PUBLISHER
+
     def is_public(self, address: Address):
         return self._index.contains(address)
 
