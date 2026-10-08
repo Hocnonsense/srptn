@@ -34,10 +34,11 @@ class Dataset(Entity):
             if meta_files is not None and not meta_files.is_empty():
                 st.subheader("Meta Files")
                 for name in meta_files["name"]:
+                    key = f"{self.address}/meta/{name}"
                     with self._data_store.load_file(
                         self.address, name, FileType.META
                     ) as file:
-                        st.download_button(name, file, file_name=name)
+                        st.download_button(name, file, key=key, file_name=name)
 
         files = self.list_files(FileType.DATA)
         if files is not None:

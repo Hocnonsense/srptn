@@ -239,8 +239,11 @@ class Analysis(Entity):
 
         parent_tabs = st.tabs(["Datasets", "Logs"])
         with parent_tabs[0]:
+            if self.datasets:
             dataset_tabs = st.tabs([str(data.address) for data in self.datasets])
-            for dataset_tab, dataset in zip(dataset_tabs, self.datasets, strict=True):
+                for dataset_tab, dataset in zip(
+                    dataset_tabs, self.datasets, strict=True
+                ):
                 with dataset_tab:
                     st.dataframe(dataset.sheet)
         with parent_tabs[1]:

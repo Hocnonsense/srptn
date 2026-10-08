@@ -180,7 +180,7 @@ class FSDataStore(DataStore):
         """Check if a file exists for the given address, path, and file type."""
         return (self.files_path(address, file_type) / file_path).exists()
 
-    def list_files(self, address: Address, file_type: FileType) -> pl.DataFrame:
+    def list_files(self, address: Address, file_type: FileType):
         """List all files of a specific type at the given address."""
         files_dir = self.files_path(address, file_type)
         if files_dir.exists():
