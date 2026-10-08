@@ -1,15 +1,11 @@
-import subprocess
-from typing import NamedTuple
-
 import streamlit as st
-from snakedeploy.exceptions import UserError
 
 from ..access.store import AccessStore
 from ..accounts.policy import Actor
 from ..data import Address
-from ..data.entities.analysis import Analysis, WorkflowManager
+from ..data.entities.analysis import WorkflowManager
 from ..data.fs import FSDataStore
-from ..utils.snakedeploy import CachedWorkflowManager, RepoRefs
+from ..utils.snakedeploy import CachedWorkflowManager, RepoRefs, Version
 from .config_editor import ace_config_editor, config_editor
 from .schemas import infer_schema, update_schema
 from .ui_components import persistent_text_input
@@ -60,36 +56,19 @@ _SELECTED_MANAGER = "workflow-selected-manager"
 _SELECTED_VERSION = "workflow-selected-version"
 
 
-class Version(NamedTuple):
-    """A repository and the Git refs that pin a workflow deployment."""
-
-    url: str
-    tag: str | None = None
-    branch: str | None = None
-    commit: str | None = None
-
-    def selection(self, address: Address):
-        return self.url, self.commit, str(address)
-
-
 def workflow_selector(
     access: AccessStore,
     actor: Actor,
     address: Address,
     data_store: FSDataStore,
-    *,
-    desc=None,
-    datasets=None,
 ):
     """Pick a repository/version, deploy it on demand and return its manager."""
     cached = CachedWorkflowManager(data_store)
-    version = _select_version(cached)
+    version = select_workflow(cached)
     if version is None:
         return None
     if st.button("Deploy", key="workflow-meta-deploy"):
-        return _deploy(
-            cached, access, actor, address, version, desc=desc, datasets=datasets
-        )
+        return _deploy(cached, access, actor, address, version)
     if st.session_state.get(_SELECTED_VERSION) == version.selection(address):
         return st.session_state.get(_SELECTED_MANAGER)
 
@@ -133,7 +112,7 @@ def _read_refs(cached: CachedWorkflowManager, url: str) -> RepoRefs | None:
     return st.session_state[key]
 
 
-def _select_version(cached: CachedWorkflowManager):
+def select_workflow(cached: CachedWorkflowManager):
     """Render the repository and version controls and return the pending version."""
     url = _select_repository(cached)
     if url is None:
@@ -293,20 +272,8 @@ def _deploy(
     actor: Actor,
     address: Address,
     version: Version,
-    *,
-    desc=None,
-    datasets=None,
 ):
-    """Resolve the commit, deploy it into the workspace and persist the analysis."""
-    commit = version.commit
-    if commit is None and (version.tag is not None or version.branch is not None):
-        try:
-            commit = cached.resolve_ref(
-                version.url, tag=version.tag, branch=version.branch
-            )
-        except (OSError, subprocess.CalledProcessError, UserError, ValueError) as error:
-            st.error(f"Failed to resolve workflow version: {error}")
-            return None
+    """Resolve the commit and deploy a workspace for editing before Store."""
     selection = version.selection(address)
     if st.session_state.get(_SELECTED_VERSION) == selection:
         return st.session_state[_SELECTED_MANAGER]
@@ -315,33 +282,10 @@ def _deploy(
         if isinstance(key, str) and key.startswith("workflow-config-"):
             del st.session_state[key]
     workspace = access.workspace(actor, address)
-    try:
-        with workspace as data_path:
-            cached.deploy(data_path, address.name, version.url, commit=commit)
-        manager = WorkflowManager(
-            version.url, version.tag, version.branch, workspace, commit=commit
-        )
-        manager.check()
-        manager.export_metadata()
-        if desc is not None:
-            # A successful deploy also persists the analysis (description and
-            # inputs), so it never leaves an occupied-but-empty address.
-            Analysis(address, desc, datasets or [], manager).write_entity(workspace)
-    except (
-        OSError,
-        subprocess.CalledProcessError,
-        UserError,
-        ValueError,
-        RuntimeError,
-    ) as error:
-        workspace.clean()
-        st.error(f"Failed to deploy workflow: {error}")
-        return None
-    except BaseException:
-        workspace.clean()
-        raise
-    st.session_state[_SELECTED_MANAGER] = manager
-    st.session_state[_SELECTED_VERSION] = selection
+    manager = WorkflowManager.deploy(workspace, version, cached)
+    if manager is not None:
+        st.session_state[_SELECTED_MANAGER] = manager
+        st.session_state[_SELECTED_VERSION] = selection
     return manager
 
 
@@ -358,17 +302,20 @@ def workflow_editor(workflow_manager: WorkflowManager):
     )
 
     st.divider()
-    if not st.session_state.get("workflow-config-form"):
-        st.session_state["workflow-config-form"] = workflow_manager.get_config()
-        st.session_state["workflow-config-form-schema"] = workflow_manager.get_schema(
-            "config",
-        )
-        config = st.session_state["workflow-config-form"]
-        config_schema = st.session_state["workflow-config-form-schema"]
+    if st.session_state.get("workflow-config-form") is None:
+        config = workflow_manager.get_config()
+        if config is None:
+            config = {}
+        elif not isinstance(config, dict):
+            st.error("Workflow configuration must be a YAML mapping.")
+            return
+        config_schema = workflow_manager.get_schema("config")
         if config_schema:
             final_schema = update_schema(config_schema, config)
         else:
             final_schema = infer_schema(config)
+        st.session_state["workflow-config-form"] = config
+        st.session_state["workflow-config-form-schema"] = final_schema
         st.session_state["workflow-config-form-valid"] = {}
     else:
         config = st.session_state["workflow-config-form"]

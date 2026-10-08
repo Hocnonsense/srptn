@@ -14,6 +14,7 @@ from snakedeploy.deploy import WorkflowDeployer
 from snakedeploy.providers import Local, Provider, get_provider
 
 if TYPE_CHECKING:
+    from ..data import Address
     from ..data.fs import FSDataStore
 
 
@@ -52,6 +53,27 @@ def git_refresh(repo: Path, url: str):
         "+refs/tags/*:refs/tags/*",
     )
     _git(repo, "remote", "set-head", "origin", "--auto")
+
+
+class Version(NamedTuple):
+    """A repository and the Git refs that pin a workflow deployment."""
+
+    url: str
+    tag: str | None = None
+    branch: str | None = None
+    commit: str | None = None
+    """Commit is None if the workflow is a plain local directory (no Git)."""
+
+    def selection(self, address: "Address"):
+        return self.url, self.commit, str(address)
+
+    @property
+    def ref(self):
+        if self.tag:
+            return self.tag
+        if self.branch:
+            return self.branch
+        return self.commit
 
 
 class RepoRefs(NamedTuple):

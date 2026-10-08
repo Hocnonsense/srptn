@@ -2,15 +2,18 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+import subprocess
 from typing import TYPE_CHECKING
 import polars as pl
 import streamlit as st
 import yaml
 
+from snakedeploy.exceptions import UserError
 
 from ...components.logs import log_selector
 from ...tmux import TmuxSessionManager
 from ...utils.polars_utils import load_data_table, save_data_table
+from ...utils.snakedeploy import Version
 from ...utils.yaml_utils import CustomSafeDumper, CustomSafeLoader
 from .. import Address, DataStore, Entity, FileType
 from ..entities.dataset import Dataset
@@ -19,17 +22,46 @@ from ..workspace import Workspace
 if TYPE_CHECKING:
     from ...access.store import AccessStore
     from ...accounts.policy import Actor
+    from ...utils.snakedeploy import CachedWorkflowManager
 
 
 @dataclass
 class WorkflowManager:
     """Manages workflow configurations, deployments, and validations."""
 
-    url: str
-    tag: str | None
-    branch: str | None
     workspace: Workspace
-    commit: str | None = None
+    version: Version
+
+    @classmethod
+    def deploy(
+        cls, workspace: Workspace, version: Version, cached: CachedWorkflowManager
+    ):
+        try:
+            workspace.clean()
+            with workspace as data_path:
+                cached.deploy(
+                    data_path,
+                    workspace.address.name,
+                    version.url,
+                    commit=version.commit,
+                )
+            self = cls(workspace, version)
+            self.check()
+            self.export_metadata()
+        except (
+            OSError,
+            subprocess.CalledProcessError,
+            UserError,
+            ValueError,
+            RuntimeError,
+        ) as error:
+            workspace.clean()
+            st.error(f"Failed to deploy workflow: {error}")
+            return None
+        except BaseException:
+            workspace.clean()
+            raise
+        return self
 
     @classmethod
     def load(cls, workspace: Workspace):
@@ -38,11 +70,8 @@ class WorkflowManager:
         with (meta_path / "details.yml").open("r") as file:
             details = yaml.safe_load(file)
         workflow_manager = cls(
-            url=details["url"],
-            tag=details["tag"],
-            branch=details["branch"],
-            commit=details["commit"],
             workspace=workspace,
+            version=Version(**details),
         )
         workflow_manager.check()
         return workflow_manager
@@ -99,12 +128,7 @@ class WorkflowManager:
 
     def export_metadata(self):
         """Save workflow metadata to YAML file."""
-        details = {
-            "url": self.url,
-            "tag": self.tag,
-            "branch": self.branch,
-            "commit": self.commit,
-        }
+        details = self.version._asdict()
         self.workspace.meta_path.mkdir(parents=True, exist_ok=True)
         with (self.workspace.meta_path / "details.yml").open("w") as f:
             yaml.safe_dump(details, f)
@@ -203,7 +227,7 @@ class AnalysisRuntimeManager:
             if self._authorized(access, actor):
                 self.tmux_manager.close_session(self.session_name)
 
-    def check_status(self) -> None:
+    def check_status(self):
         """Update stored analysis output from tmux session."""
         output = self.tmux_manager.capture_output(self.session_name)
         self.output = output
