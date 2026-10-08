@@ -16,7 +16,7 @@ def desc_editor(key: str):
             "Enter description",
             "Markdown Format",
         )
-    desc = st.session_state.get(f"{key}-description", "")
+    desc = st.session_state.get(f"{key}-description-value", "")
     if desc:
         st.caption("Preview")
         st.markdown(desc)
