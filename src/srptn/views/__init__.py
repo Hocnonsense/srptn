@@ -17,11 +17,6 @@ import streamlit as st
 
 from srptn.common.accounts.policy import Role, Actor
 
-from .analyses import page_analyses
-from .analysis_new import page_new_analysis
-from .dataset_new import page_new_dataset
-from .datasets import page_datasets
-
 
 class PageInfo(NamedTuple):
     source: Callable[[Actor], None] | str
@@ -47,19 +42,23 @@ class PageInfo(NamedTuple):
         return render
 
 
-PAGES = (
-    PageInfo(page_new_dataset, "New Dataset", Role.HOST),
-    PageInfo(page_datasets, "Datasets", None),
-    PageInfo(page_new_analysis, "New Analysis", Role.HOST),
-    PageInfo(page_analyses, "Analyses", None),
-    PageInfo("views/5 Notebook (Mockup).py", "Notebook (Mockup)", None),
-    PageInfo("views/6 Compose Figure (Mockup).py", "Compose Figure (Mockup)", None),
-)
-
-
 def visible_pages(actor: Actor):
     """The pages ``actor`` may see in the navigation."""
+    from .analyses import page_analyses
+    from .analysis_new import page_new_analysis
+    from .dataset_new import page_new_dataset
+    from .datasets import page_datasets
+    from .workflow_new import page_new_workflow
 
+    PAGES = (
+        PageInfo(page_new_dataset, "New Dataset", Role.HOST),
+        PageInfo(page_datasets, "Datasets", None),
+        PageInfo(page_new_workflow, "New Workflow", Role.PUBLISHER),
+        PageInfo(page_new_analysis, "New Analysis", Role.HOST),
+        PageInfo(page_analyses, "Analyses", None),
+        PageInfo("views/5 Notebook (Mockup).py", "Notebook (Mockup)", None),
+        PageInfo("views/6 Compose Figure (Mockup).py", "Compose Figure (Mockup)", None),
+    )
     for page in PAGES:
         if page.permitted(actor):
             yield st.Page(page.page(actor), title=page.title)
