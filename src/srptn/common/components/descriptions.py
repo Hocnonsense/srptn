@@ -9,18 +9,15 @@ def desc_editor(key: str):
     :param key: A string prefix to uniquely identify session state keys for descriptions.
     :return: The text entered in the description area as a string.
     """
-    col1, col2 = st.columns(2)
-
-    with col1:
-        desc = persistent_text_area(
-            "Description",
+    if st.button("Edit description", f"{key}-description-open"):
+        persistent_text_area(
+            "",
             f"{key}-description",
             "Enter description",
             "Markdown Format",
         )
-
-    with col2:
+    desc = st.session_state.get(f"{key}-description", "")
+    if desc:
         st.caption("Preview")
         st.markdown(desc)
-
     return desc

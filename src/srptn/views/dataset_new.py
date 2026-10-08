@@ -3,8 +3,7 @@ import polars.selectors as cs
 import streamlit as st
 
 from srptn.common.accounts.policy import Actor, Role
-from srptn.common.components.categories import category_editor
-from srptn.common.components.descriptions import desc_editor
+from srptn.common.components.forms import entity_meta_editor
 from srptn.common.data import Address
 from srptn.common.data.entities.dataset import Dataset
 from srptn.common.data.fs import fs_data_store
@@ -16,8 +15,7 @@ from srptn.views import PageInfo
 def page_new_dataset(actor: Actor):
     data_store = fs_data_store()
 
-    categories = category_editor("new_dataset-meta")
-    dataset_name = st.text_input("Dataset name")
+    categories, dataset_name, desc = entity_meta_editor("new_dataset", "Dataset name")
 
     address = Address(actor.id, Dataset, categories=categories, name=dataset_name)
     if not address.categories and not address.name:
@@ -25,8 +23,6 @@ def page_new_dataset(actor: Actor):
     if data_store.occupied(address):
         st.error(f"Dataset {address} already exists")
         st.stop()
-
-    desc = desc_editor("new_dataset-meta")
 
     files = st.file_uploader("Files", accept_multiple_files=True)
 
