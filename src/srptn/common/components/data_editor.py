@@ -4,7 +4,6 @@ from streamlit.delta_generator import DeltaGenerator
 from streamlit.runtime.uploaded_file_manager import UploadedFile
 from streamlit_ace import THEMES, st_ace
 
-from .schemas import update_schema
 from .ui_components import toggle_button
 from ..data.entities.analysis import WorkflowManager
 from ..utils.polars_utils import (
@@ -12,7 +11,7 @@ from ..utils.polars_utils import (
     load_data_table,
     merge_dataframes,
 )
-from ..utils.schema_inference import infer_schema
+from ..utils.schema_inference import infer_schema, update_schema
 
 
 def add_column(key: str):

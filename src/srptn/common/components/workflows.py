@@ -6,9 +6,8 @@ from ..data import Address
 from ..data.entities.analysis import WorkflowManager
 from ..data.fs import FSDataStore
 from ..utils.snakedeploy import CachedWorkflowManager, RepoRefs, Version
-from ..utils.schema_inference import infer_schema
+from ..utils.schema_inference import infer_schema, update_schema
 from .config_editor import ace_config_editor, config_editor
-from .schemas import update_schema
 from .ui_components import persistent_text_input
 
 auto_open_script = """

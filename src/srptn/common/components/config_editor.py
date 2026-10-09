@@ -7,8 +7,8 @@ from streamlit_ace import st_ace
 from streamlit_tags import st_tags
 
 from .data_editor import data_editor, data_selector
-from .schemas import get_property_type
 from ..data.entities.analysis import WorkflowManager
+from ..utils.schema_inference import get_property_type
 from ..utils.yaml_utils import load_yaml, dump_yaml
 
 
