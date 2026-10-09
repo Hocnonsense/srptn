@@ -44,3 +44,13 @@ class CustomSafeDumper(yaml.SafeDumper):
 CustomSafeDumper.add_representer(
     str, CustomSafeDumper.scientificfloat_from_string_as_float
 )
+
+
+def load_yaml(text: str):
+    """Parse YAML using the project loader (keeps scientific floats as strings)."""
+    return yaml.load(text, Loader=CustomSafeLoader)
+
+
+def dump_yaml(data):
+    """Dump YAML using the project dumper (keeps scientific floats as strings)."""
+    return yaml.dump(data, sort_keys=False, Dumper=CustomSafeDumper)

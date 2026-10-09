@@ -14,7 +14,7 @@ from ...components.logs import log_selector
 from ...tmux import TmuxSessionManager
 from ...utils.polars_utils import load_data_table, save_data_table
 from ...utils.snakedeploy import Version
-from ...utils.yaml_utils import CustomSafeDumper, CustomSafeLoader
+from ...utils.yaml_utils import dump_yaml, load_yaml
 from .. import Address, DataStore, Entity, FileType
 from ..entities.dataset import Dataset
 from ..workspace import Workspace
@@ -137,7 +137,7 @@ class WorkflowManager:
         """Load workflow configuration."""
         try:
             if self.config_path:
-                return yaml.load(self.config_path.read_text(), Loader=CustomSafeLoader)
+                return load_yaml(self.config_path.read_text())
         except yaml.YAMLError as e:
             st.error(f"Error parsing config YAML: {e}")
             st.stop()
@@ -162,7 +162,7 @@ class WorkflowManager:
             path = self.schema_dir / f"{item}.schema.{ext}"
             if path.exists():
                 if ext != "json":
-                    return yaml.load(path.read_text(), Loader=CustomSafeLoader)
+                    return load_yaml(path.read_text())
                 return json.load(path.read_text())  # type: ignore[reportArgumentType]
 
     def update_configs_from_session_state(self):
@@ -186,7 +186,7 @@ class WorkflowManager:
             self.config_dir.mkdir(parents=True, exist_ok=True)
             config_path = self.config_dir / "config.yaml"
         with config_path.open("w") as f:
-            f.write(yaml.dump(config, sort_keys=False, Dumper=CustomSafeDumper))
+            f.write(dump_yaml(config))
 
 
 class AnalysisRuntimeManager:

@@ -9,7 +9,7 @@ from streamlit_tags import st_tags
 from .data_editor import data_editor, data_selector
 from .schemas import get_property_type
 from ..data.entities.analysis import WorkflowManager
-from ..utils.yaml_utils import CustomSafeLoader
+from ..utils.yaml_utils import load_yaml, dump_yaml
 
 
 def ace_config_editor(
@@ -23,11 +23,9 @@ def ace_config_editor(
     :param final_schema: The schema that defines the structure and types of the config.
     :param workflow_manager: An object providing data-related functions.
     """
-    value = st_ace(yaml.dump(config, sort_keys=False), language="yaml")
+    value = st_ace(dump_yaml(config), language="yaml")
     try:
-        parsed_config = (
-            None if value is None else yaml.load(value, Loader=CustomSafeLoader)
-        )
+        parsed_config = None if value is None else load_yaml(value)
     except yaml.YAMLError as error:
         st.error(f"Error parsing config YAML: {error}")
         return

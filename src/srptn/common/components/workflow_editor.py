@@ -21,20 +21,21 @@ import yaml
 from streamlit_ace import st_ace
 
 
-from ..components.schemas import infer_schema
 from ..data import Address, DataStore
 from ..data.entities.workflow import UpstreamRef, Workflow
+from ..utils.schema_inference import infer_schema
+from ..utils.schema_validation import validation_errors
 from ..utils.snakedeploy import Version
-from ..utils.workflow_curation import (
-    PreviewResult,
+from ..utils.workflow_preview import PreviewResult
+from ..utils.workflow_tables import (
     TableSpec,
     build_tables,
-    load_yaml,
+    infer_table_schema,
+    schema_columns,
     tables_from_data,
     tables_to_data,
-    validation_errors,
 )
-from ..utils.yaml_utils import CustomSafeDumper
+from ..utils.yaml_utils import dump_yaml, load_yaml
 
 _ACE_HEIGHT = 340
 _TABLE_ACE_HEIGHT = 220
@@ -64,7 +65,7 @@ class DeployInitialState(NamedTuple):
         config_text = config.read_text()
         config_dict = load_yaml(config_text)
         internal = schema or infer_schema(config_dict)
-        internal_text = yaml.dump(internal, sort_keys=False, Dumper=CustomSafeDumper)
+        internal_text = dump_yaml(internal)
         tables_text = tables_to_data(build_tables(config_dict, data_path))
         return cls(
             address=address,
@@ -111,11 +112,7 @@ def workflow_editor(
         )
     with col2:
         runner_schema_text = st_ace(
-            yaml.dump(
-                st.session_state[schema_dict_key],
-                sort_keys=False,
-                Dumper=CustomSafeDumper,
-            ),
+            dump_yaml(st.session_state[schema_dict_key]),
             language="yaml",
             height=_ACE_HEIGHT,
             auto_update=False,
@@ -183,9 +180,7 @@ def workflow_editor(
                 desc=desc,
                 upstream=init_state.upstream,
                 config=config_text,
-                config_schema=yaml.dump(
-                    runner_schema, sort_keys=False, Dumper=CustomSafeDumper
-                ),
+                config_schema=dump_yaml(runner_schema),
                 code=code,
                 tables=tables_to_data(st.session_state[tables_dict_key]),
             )
@@ -228,7 +223,7 @@ def _table_editor(key: str, identifier: str, spec: TableSpec, config):
         if not paths:
             st.warning("No file path declared for this table.")
         if not example:
-            columns = _schema_columns(row_schema) or ["column"]
+            columns = schema_columns(row_schema) or ["column"]
             example = dict.fromkeys(columns, [])
         frame = pl.DataFrame(example)
         edited = st.data_editor(
@@ -241,11 +236,7 @@ def _table_editor(key: str, identifier: str, spec: TableSpec, config):
         new_example = pl.from_pandas(edited).to_dict(as_series=False)
     with col2:
         default_schema = yaml.safe_dump(
-            (
-                row_schema
-                if isinstance(row_schema, dict)
-                else _infer_table_schema(frame)
-            ),
+            (row_schema if isinstance(row_schema, dict) else infer_table_schema(frame)),
             sort_keys=False,
         )
         new_schema_text = st_ace(
@@ -266,31 +257,6 @@ def _table_editor(key: str, identifier: str, spec: TableSpec, config):
         for message in spec.errors():
             st.error(f"table '{identifier}': {message}")
     return spec
-
-
-def _schema_columns(schema) -> list[str]:
-    properties = schema.get("properties") if isinstance(schema, dict) else None
-    return list(properties) if isinstance(properties, dict) else []
-
-
-def _json_type(dtype):
-    if dtype.is_integer():
-        return "integer"
-    if dtype.is_float():
-        return "number"
-    if dtype == pl.Boolean:
-        return "boolean"
-    return "string"
-
-
-def _infer_table_schema(table: pl.DataFrame):
-    return {
-        "type": "object",
-        "properties": {
-            column: {"type": _json_type(table.schema[column])}
-            for column in table.columns
-        },
-    }
 
 
 def _parse(text: str):

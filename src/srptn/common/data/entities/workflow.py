@@ -19,7 +19,7 @@ import yaml
 
 from .. import DataStore, Entity
 from ...utils.snakedeploy import Version
-from ...utils.workflow_curation import tables_from_data
+from ...utils.workflow_tables import tables_from_data
 
 UPSTREAM_FILE = "upstream.yml"
 CONFIG_FILE = "config.yaml"
