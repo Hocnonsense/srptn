@@ -55,7 +55,7 @@ class Dataset(Entity):
         else:
             sheet = None
 
-        return cls(address, workspace.load_desc(), sheet, _data_store=data_store)
+        return cls(address, workspace.desc, sheet, _data_store=data_store)
 
     def store(self, data_store: DataStore):
         """Store the dataset, including files and sample sheet, in the data store."""

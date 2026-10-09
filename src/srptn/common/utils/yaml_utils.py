@@ -2,6 +2,8 @@ import re
 
 import yaml
 
+SCIENTIFIC_FLOAT = re.compile(r"^\d+(\.\d+)?[eE][-+]?\d+$")
+
 
 class CustomSafeLoader(yaml.SafeLoader):
     """Custom YAML loader."""
@@ -13,7 +15,7 @@ class CustomSafeLoader(yaml.SafeLoader):
         """Load scientific floats as strings if in scientific notation."""
         value = self.construct_scalar(node)
         # Check if the value looks like a float in scientific notation
-        if re.match(r"^\d+(\.\d+)?[eE][-+]?\d+$", value):
+        if SCIENTIFIC_FLOAT.match(value):
             return value
         return float(value)
 

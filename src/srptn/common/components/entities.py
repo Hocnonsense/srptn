@@ -52,6 +52,6 @@ def data_selector(access: AccessStore, actor: Actor, key: str):
         st.session_state["workflow-meta-datasets-sheets"] = {
             str(entity.address): entity.sheet for entity in entities
         }
-        return entities
-    st.warning("No Dataset found")
-    return []
+    else:
+        st.warning("No Dataset found")
+    return entities

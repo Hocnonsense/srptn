@@ -9,12 +9,14 @@ real path, so isolation is a separate concern.
 from __future__ import annotations
 
 import fcntl
+import io
 from typing import TYPE_CHECKING
+
+from . import Address, FileType
 
 if TYPE_CHECKING:
     import polars as pl
 
-    from . import Address, FileType
     from .fs import FSDataStore
 
 LOCK_NAME = ".lock"
@@ -27,14 +29,17 @@ class Workspace:
         self.store = store
         self.address = address
         self._lock_file = None
-        from . import FileType
 
         self.meta_path = self.store.files_path(self.address, FileType.META)
         self.data_path = self.store.files_path(self.address, FileType.DATA)
 
     # --- content (bound to the address) ---------------------------------
+    @property
+    def desc_path(self):
+        return self.store.desc_path(self.address)
 
-    def load_desc(self):
+    @property
+    def desc(self):
         return self.store.load_desc(self.address)
 
     def store_desc(self, desc: str):
@@ -60,6 +65,18 @@ class Workspace:
 
     def list_files(self, file_type: FileType):
         return self.store.list_files(self.address, file_type)
+
+    def write_meta(self, name: str, text: str):
+        self.store_file(io.BytesIO(text.encode()), name, FileType.META)
+
+    def read_meta(self, name: str, default=None):
+        try:
+            with self.load_file(name, FileType.META) as handle:
+                return handle.read().decode()
+        except FileNotFoundError:
+            if default is not None:
+                return default
+            raise
 
     # --- lifecycle ------------------------------------------------------
 

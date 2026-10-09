@@ -1,11 +1,8 @@
 import streamlit as st
-import yaml
 
 from srptn.common.access.store import AccessStore
 from srptn.common.accounts.policy import Actor, Role
-from srptn.common.components.entities import data_selector
 from srptn.common.components.forms import entity_meta_editor
-from srptn.common.components.schemas import infer_schema
 from srptn.common.components.workflow_editor import (
     DeployInitialState,
     workflow_editor,
@@ -16,11 +13,14 @@ from srptn.common.data.entities.analysis import WorkflowManager
 from srptn.common.data.entities.workflow import Workflow
 from srptn.common.data.fs import fs_data_store
 from srptn.common.utils.snakedeploy import CachedWorkflowManager, Version
-from srptn.common.utils.workflow_curation import load_yaml
-from srptn.common.utils.yaml_utils import CustomSafeDumper
 from srptn.views import PageInfo
 
 _KEY = "workflow-new"
+_CONTEXTS = f"{_KEY}-contexts"
+
+
+def _contexts() -> dict[str, DeployInitialState]:
+    return st.session_state.setdefault(_CONTEXTS, {})
 
 
 def _deploy_upstream(
@@ -36,18 +36,35 @@ def _deploy_upstream(
     if manager is None:
         return
 
-    assert manager.config_path and manager.snakefile_path
-    config_text = manager.config_path.read_text()
-    schema = manager.get_schema("config") or infer_schema(load_yaml(config_text))
-    schema_text = yaml.dump(schema, sort_keys=False, Dumper=CustomSafeDumper)
-    st.session_state[f"{_KEY}-context"] = DeployInitialState(
-        address=address,
-        version=version,
-        config=config_text,
-        schema=schema_text,
-        internal_schema=schema_text,
+    _contexts()[str(address)] = _get_init_state(manager)
+    run_key = f"{_KEY}-{address}-run"
+    st.session_state[run_key] = st.session_state.get(run_key, 0) + 1
+
+
+def _reopen_deployed(access: AccessStore, actor: Actor, address: Address):
+    """Rebuild the curation state from an unsaved deployment in the workspace.
+
+    Returns ``None`` when there is nothing to reopen (no deployment) or when the
+    address already holds a stored ``Workflow`` entity (``desc.md`` present).
+    """
+    workspace = access.workspace(actor, address)
+    if workspace.desc_path.exists():
+        return None
+    if not (workspace.meta_path / "details.yml").exists():
+        return None
+
+    return _get_init_state(WorkflowManager.load(workspace))
+
+
+def _get_init_state(manager: WorkflowManager):
+    assert manager.config_path
+    return DeployInitialState.from_workflow(
+        manager.workspace.address,
+        manager.version,
+        manager.config_path,
+        manager.get_schema("config"),
+        manager.workspace.data_path,
     )
-    st.session_state[f"{_KEY}-run"] = st.session_state.get(f"{_KEY}-run", 0) + 1
 
 
 @PageInfo.wrap("New Workflow", Role.PUBLISHER)
@@ -63,12 +80,15 @@ def page_new_workflow(actor: Actor):
         st.stop()
 
     address = Address(actor.id, Workflow, categories=categories, name=name)
-    context: DeployInitialState | None = st.session_state.get(f"{_KEY}-context")
-    if data_store.occupied(address) and (context is None or context.address != address):
-        st.error(f"Workflow {address} already exists")
-        st.stop()
-
-    data_selector(access, actor, f"{_KEY}-datasets")
+    context = _contexts().get(str(address))
+    if context is None and data_store.occupied(address):
+        # Reopen a deployment that was not stored yet instead of rejecting it,
+        # so losing the session context (e.g. a page reload) is not fatal.
+        context = _reopen_deployed(access, actor, address)
+        if context is None:
+            st.error(f"Workflow {address} already exists")
+            st.stop()
+        _contexts()[str(address)] = context
 
     cached = CachedWorkflowManager(data_store)
     version = select_workflow(cached)
@@ -78,9 +98,17 @@ def page_new_workflow(actor: Actor):
     if st.button("Deploy upstream", key=f"{_KEY}-deploy"):
         _deploy_upstream(access, actor, address, cached, version)
 
-    context = st.session_state.get(f"{_KEY}-context")
+    context = _contexts().get(str(address))
     if not context:
         st.info("Select a repository and version, then deploy to start curation.")
         return
 
-    workflow_editor(_KEY, init_state=context, desc=desc, data_store=data_store)
+    workflow = workflow_editor(
+        f"{_KEY}-{address}", init_state=context, desc=desc, data_store=data_store
+    )
+    if st.button(
+        "Save workflow", key=f"{_KEY}-save-workflow", disabled=workflow is None
+    ):
+        assert workflow is not None
+        workflow.store(data_store)
+        st.success(f"Saved workflow {workflow.address}")

@@ -164,7 +164,6 @@ class WorkflowManager:
                 if ext != "json":
                     return yaml.load(path.read_text(), Loader=CustomSafeLoader)
                 return json.load(path.read_text())  # type: ignore[reportArgumentType]
-        return None
 
     def update_configs_from_session_state(self):
         """Update configuration files from Streamlit session state."""
@@ -291,7 +290,7 @@ class Analysis(Entity):
     def load(cls, data_store, address):
         """Create Analysis instance from stored data."""
         workspace = data_store.workspace(address)
-        desc = workspace.load_desc()
+        desc = workspace.desc
         inputs = (
             workspace.load_sheet("input").iter_rows(named=True)
             if workspace.has_sheet("input")
@@ -303,7 +302,7 @@ class Analysis(Entity):
             datasets.append(
                 Dataset(
                     address=dataset_address,
-                    desc=data_store.workspace(dataset_address).load_desc(),
+                    desc=data_store.workspace(dataset_address).desc,
                     sheet=workspace.load_sheet(f"input/sheet-{i}"),
                     _data_store=data_store,
                 ),
@@ -312,7 +311,7 @@ class Analysis(Entity):
         analysis_run_manager = AnalysisRuntimeManager(address)
         return cls(address, desc, datasets, workflow_manager, analysis_run_manager)
 
-    def write_entity(self, workspace):
+    def write_entity(self, workspace: Workspace):
         """Persist the description and input sheets (not the run config)."""
         workspace.store_desc(self.desc)
         sheets = {

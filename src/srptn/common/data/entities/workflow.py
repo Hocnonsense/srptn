@@ -3,47 +3,33 @@
 A ``Workflow`` is a first-class entity like ``Dataset`` and ``Analysis``: it is
 owned, stored in the data store and published through the same visibility
 mechanism.  Its content is the curation contract -- the pinned upstream
-reference, the external (runner-facing) config and schema, the
-``parse_config`` transformation, the generated wrapper ``Snakefile`` and the
-upstream internal schema kept as a validation reference.
+reference (version + internal schema), the runner-facing config and schema, the
+table sidecar (declared tables with row schemas and examples) and the top-level
+``code`` that converts the runner config into the upstream config.  The deployed
+Snakefile is left untouched; the platform runs the code to produce the config.
 """
 
 from __future__ import annotations
 
-import io
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, NamedTuple
+from typing import NamedTuple
 
 import streamlit as st
 import yaml
 
-
-from .. import DataStore, Entity, FileType
+from .. import DataStore, Entity
 from ...utils.snakedeploy import Version
-
-if TYPE_CHECKING:
-    from ..workspace import Workspace
+from ...utils.workflow_curation import tables_from_data
 
 UPSTREAM_FILE = "upstream.yml"
 CONFIG_FILE = "config.yaml"
 CONFIG_SCHEMA_FILE = "config.schema.yaml"
-PARSE_CONFIG_FILE = "parse_config.py"
-SNAKEFILE_FILE = "Snakefile"
-
-
-def write_meta(workspace: Workspace, name: str, text: str):
-    """Store a text artifact under the workspace's meta files."""
-    workspace.store_file(io.BytesIO(text.encode()), name, FileType.META)
-
-
-def read_meta(workspace: Workspace, name: str):
-    """Read a text artifact stored by :func:`write_meta`."""
-    with workspace.load_file(name, FileType.META) as handle:
-        return handle.read().decode()
+TABLES_FILE = "tables.yaml"
+CODE_FILE = "config_code.py"
 
 
 class UpstreamRef(NamedTuple):
-    """A pinned upstream reference: URL and commit hash."""
+    """A pinned upstream reference: URL/commit and the internal schema."""
 
     version: Version
     schema: str | None = None
@@ -69,50 +55,54 @@ class Workflow(Entity):
     upstream: UpstreamRef
     config: str
     config_schema: str
-    parse_config: str
-    snakefile: str
+    code: str
+    tables: str = ""
 
     def show(self, actor, access):
         """Display the curated contract (already authorized)."""
         st.subheader("Upstream")
         st.code(
-            f"{self.upstream.version.url} @ {self.upstream.version.commit}",
+            f"{self.upstream.version.url} @ {self.upstream.version.ref}",
             language="text",
         )
-        st.caption(f"Snakemake module: {self.address.name}")
         st.subheader("Schema")
         st.code(self.config_schema, language="yaml")
         if access.can_write(actor, self.address):
-            with st.expander("Convert config to upstream format"):
-                st.code(self.parse_config, language="python")
+            with st.expander("Config conversion code"):
+                st.code(self.code, language="python")
             with st.expander("Upstream internal schema (validation reference)"):
                 st.code(self.upstream.schema, language="yaml")
+            for identifier, spec in tables_from_data(self.tables).items():
+                with st.expander(f"Table: {identifier}"):
+                    if spec.example:
+                        st.dataframe(spec.example_table, use_container_width=True)
+                    st.code(
+                        yaml.safe_dump(spec.schema, sort_keys=False),
+                        language="yaml",
+                    )
 
     @classmethod
     def load(cls, data_store: DataStore, address):
         """Load a curated workflow from the data store."""
         workspace = data_store.workspace(address)
-        details = yaml.safe_load(read_meta(workspace, UPSTREAM_FILE))
+        details = yaml.safe_load(workspace.read_meta(UPSTREAM_FILE))
         return cls(
             address=address,
-            desc=workspace.load_desc(),
+            desc=workspace.desc,
             upstream=UpstreamRef.from_dict(details),
-            config=read_meta(workspace, CONFIG_FILE),
-            config_schema=read_meta(workspace, CONFIG_SCHEMA_FILE),
-            parse_config=read_meta(workspace, PARSE_CONFIG_FILE),
-            snakefile=read_meta(workspace, SNAKEFILE_FILE),
+            config=workspace.read_meta(CONFIG_FILE),
+            config_schema=workspace.read_meta(CONFIG_SCHEMA_FILE),
+            code=workspace.read_meta(CODE_FILE),
+            tables=workspace.read_meta(TABLES_FILE, ""),
         )
 
     def store(self, data_store: DataStore):
         """Persist the curated contract in the data store."""
         workspace = data_store.workspace(self.address)
         workspace.store_desc(self.desc)
-        write_meta(
-            workspace,
-            UPSTREAM_FILE,
-            yaml.safe_dump(self.upstream.to_dict(), sort_keys=False),
-        )
-        write_meta(workspace, CONFIG_FILE, self.config)
-        write_meta(workspace, CONFIG_SCHEMA_FILE, self.config_schema)
-        write_meta(workspace, PARSE_CONFIG_FILE, self.parse_config)
-        write_meta(workspace, SNAKEFILE_FILE, self.snakefile)
+        upstream = yaml.safe_dump(self.upstream.to_dict(), sort_keys=False)
+        workspace.write_meta(UPSTREAM_FILE, upstream)
+        workspace.write_meta(CONFIG_FILE, self.config)
+        workspace.write_meta(CONFIG_SCHEMA_FILE, self.config_schema)
+        workspace.write_meta(CODE_FILE, self.code)
+        workspace.write_meta(TABLES_FILE, self.tables)
