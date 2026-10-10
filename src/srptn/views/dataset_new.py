@@ -4,7 +4,6 @@ import streamlit as st
 
 from srptn.common.accounts.policy import Actor, Role
 from srptn.common.components.forms import entity_meta_editor
-from srptn.common.data import Address
 from srptn.common.data.entities.dataset import Dataset
 from srptn.common.data.fs import fs_data_store
 from srptn.common.utils.polars_utils import load_data_table
@@ -15,14 +14,9 @@ from srptn.views import PageInfo
 def page_new_dataset(actor: Actor):
     data_store = fs_data_store()
 
-    categories, dataset_name, desc = entity_meta_editor("new_dataset", "Dataset name")
-
-    address = Address(actor.id, Dataset, categories=categories, name=dataset_name)
-    if not address.categories and not address.name:
-        st.stop()
-    if data_store.occupied(address):
-        st.error(f"Dataset {address} already exists")
-        st.stop()
+    address, desc = entity_meta_editor(
+        "new_dataset", "Dataset name", actor, Dataset, data_store
+    )
 
     files = st.file_uploader("Files", accept_multiple_files=True)
 

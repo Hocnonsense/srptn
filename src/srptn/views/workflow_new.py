@@ -74,21 +74,21 @@ def page_new_workflow(actor: Actor):
     access = AccessStore(data_store)
 
     st.header("New Workflow", divider=True)
-    categories, name, desc = entity_meta_editor(_KEY, "Workflow name")
 
-    if not categories or not name:
-        st.stop()
-
-    address = Address(actor.id, Workflow, categories=categories, name=name)
-    context = _contexts().get(str(address))
-    if context is None and data_store.occupied(address):
-        # Reopen a deployment that was not stored yet instead of rejecting it,
-        # so losing the session context (e.g. a page reload) is not fatal.
+    def resume(address: Address):
+        """Reopen a deployment that was not stored yet instead of rejecting it,
+        so losing the session context (e.g. a page reload) is not fatal."""
+        if _contexts().get(str(address)) is not None:
+            return True
         context = _reopen_deployed(access, actor, address)
         if context is None:
-            st.error(f"Workflow {address} already exists")
-            st.stop()
+            return False
         _contexts()[str(address)] = context
+        return True
+
+    address, desc = entity_meta_editor(
+        _KEY, "Workflow name", actor, Workflow, data_store, resume=resume
+    )
 
     cached = CachedWorkflowManager(data_store)
     version = select_workflow(cached)

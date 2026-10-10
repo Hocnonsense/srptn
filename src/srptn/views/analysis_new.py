@@ -80,15 +80,14 @@ def page_new_analysis(actor: Actor):
     data_store = fs_data_store()
     access = AccessStore(data_store)
 
-    categories, analysis_name, desc = entity_meta_editor("workflow", "Analysis name")
-
-    address = Address(actor.id, Analysis, categories=categories, name=analysis_name)
-    if data_store.occupied(address, only_check_meta=True):
-        st.error(f"Analysis {address} already exists")
-        st.stop()
-
-    if not categories or not analysis_name:
-        st.stop()
+    address, desc = entity_meta_editor(
+        "workflow",
+        "Analysis name",
+        actor,
+        Analysis,
+        data_store,
+        only_check_meta=True,
+    )
 
     datasets = data_selector(access, actor, "workflow-meta-datasets")
 
@@ -108,9 +107,6 @@ def page_new_analysis(actor: Actor):
             st.stop()
         # Never fail silently: a disabled button gives no feedback, so validate
         # here and report why storing cannot proceed.
-        if not analysis_name:
-            st.error("Analysis name is required before storing.")
-            return
         if not desc:
             st.error("Analysis description is required before storing.")
             return
