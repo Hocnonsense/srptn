@@ -25,7 +25,7 @@ from .workflow_tables import (
     read_table,
     write_table,
 )
-from .yaml_utils import load_yaml
+from .yaml_utils import load_yaml, parse_yaml
 
 
 class PreviewResult(NamedTuple):
@@ -89,15 +89,19 @@ class PreviewResult(NamedTuple):
 
 
 def _parse_file(name: str, content: bytes):
+    """Parse a produced file into a table/config, or ``None`` when unreadable.
+
+    Tables are read column-wise; any other file is parsed as YAML, which also
+    covers ``.json`` (a YAML subset).
+    """
     suffix = Path(name).suffix.lower()
     if suffix in TABLE_EXTENSIONS:
         return read_table(io.BytesIO(content), suffix=suffix)
-    if suffix in (".json", ".yaml", ".yml"):
-        try:
-            return load_yaml(content.decode())
-        except Exception:  # noqa: BLE001
-            return None
-    return None
+    try:
+        parsed, _ = parse_yaml(content.decode())
+    except UnicodeDecodeError:  # binary files are skipped
+        return None
+    return parsed
 
 
 def _find_schema(schema_dir: Path, name: str):

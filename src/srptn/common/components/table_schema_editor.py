@@ -16,7 +16,7 @@ import yaml
 from streamlit_ace import st_ace
 
 from ..utils.workflow_tables import TableSpec, infer_table_schema, schema_columns
-from ..utils.yaml_utils import load_yaml
+from ..utils.yaml_utils import parse_yaml
 from .table_editor import column_controls, editable_table
 
 _TABLE_ACE_HEIGHT = 220
@@ -64,7 +64,7 @@ def table_schema_editor(
             auto_update=False,
             key=f"{prefix}-schema",
         )
-        parsed, parse_error = _parse(new_schema_text)
+        parsed, parse_error = parse_yaml(new_schema_text)
         new_schema = (
             parsed if not parse_error and isinstance(parsed, dict) else row_schema
         )
@@ -75,10 +75,3 @@ def table_schema_editor(
         for message in spec.errors():
             st.error(f"table '{identifier}': {message}")
     return spec
-
-
-def _parse(text: str):
-    try:
-        return load_yaml(text), None
-    except yaml.YAMLError as error:
-        return None, f"YAML error: {error}"

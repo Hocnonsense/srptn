@@ -51,6 +51,14 @@ def load_yaml(text: str):
     return yaml.load(text, Loader=CustomSafeLoader)
 
 
+def parse_yaml(text: str):
+    """Parse YAML, returning ``(value, error)`` instead of raising on failure."""
+    try:
+        return load_yaml(text), None
+    except yaml.YAMLError as error:
+        return None, f"YAML error: {error}"
+
+
 def dump_yaml(data):
     """Dump YAML using the project dumper (keeps scientific floats as strings)."""
     return yaml.dump(data, sort_keys=False, Dumper=CustomSafeDumper)

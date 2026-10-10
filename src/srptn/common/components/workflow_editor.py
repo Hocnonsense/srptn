@@ -31,7 +31,7 @@ from ..utils.workflow_tables import (
     tables_from_data,
     tables_to_data,
 )
-from ..utils.yaml_utils import dump_yaml, load_yaml
+from ..utils.yaml_utils import dump_yaml, load_yaml, parse_yaml
 from .table_schema_editor import table_schema_editor
 
 _ACE_HEIGHT = 340
@@ -115,8 +115,8 @@ def workflow_editor(
             key=f"{key}-runner-schema-{run}",
         )
 
-    config, config_error = _parse(config_text)
-    parsed_runner, runner_error = _parse(runner_schema_text)
+    config, config_error = parse_yaml(config_text)
+    parsed_runner, runner_error = parse_yaml(runner_schema_text)
     if (
         not runner_error
         and isinstance(parsed_runner, dict)
@@ -159,7 +159,7 @@ def workflow_editor(
         key=f"{key}-code-{run}",
     )
 
-    internal_schema, _ = _parse(init_state.internal_schema_text)
+    internal_schema, _ = parse_yaml(init_state.internal_schema_text)
     schema_dir = workspace.data_path / "workflow" / "schemas"
 
     if st.button(
@@ -206,10 +206,3 @@ def _render_preview(result: PreviewResult | None):
         for name, content in result.files.items():
             with st.expander(name):
                 st.code(content.decode("utf-8", "replace"), language="text")
-
-
-def _parse(text: str):
-    try:
-        return load_yaml(text), None
-    except yaml.YAMLError as error:
-        return None, f"YAML error: {error}"

@@ -1,13 +1,11 @@
-import json
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-
-import subprocess
 from typing import TYPE_CHECKING
+
 import polars as pl
 import streamlit as st
 import yaml
-
 from snakedeploy.exceptions import UserError
 
 from ...components.logs import log_selector
@@ -161,9 +159,7 @@ class WorkflowManager:
         for ext in ("yaml", "yml", "json"):
             path = self.schema_dir / f"{item}.schema.{ext}"
             if path.exists():
-                if ext != "json":
-                    return load_yaml(path.read_text())
-                return json.load(path.read_text())  # type: ignore[reportArgumentType]
+                return load_yaml(path.read_text())
 
     def update_configs_from_session_state(self):
         """Update configuration files from Streamlit session state."""
