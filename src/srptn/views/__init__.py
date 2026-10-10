@@ -58,11 +58,13 @@ def visible_pages(actor: Actor):
     from .dataset_new import page_new_dataset
     from .datasets import page_datasets
     from .workflow_new import page_new_workflow
+    from .workflows import page_workflows
 
     for page in (
         page_new_dataset,
         page_datasets,
         page_new_workflow,
+        page_workflows,
         page_new_analysis,
         page_analyses,
         PageInfo("views/5 Notebook (Mockup).py", "Notebook (Mockup)", None),

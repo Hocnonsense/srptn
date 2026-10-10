@@ -67,6 +67,15 @@ class Version(NamedTuple):
     def selection(self, address: "Address"):
         return self.url, self.commit, str(address)
 
+    def __str__(self):
+        if self.tag:
+            return f"{self.url} @ {self.tag}"
+        if self.branch:
+            return f"{self.url} @ {self.branch}"
+        if self.commit:
+            return f"{self.url} @ {self.commit}"
+        return self.url
+
     @property
     def ref(self):
         if self.tag:

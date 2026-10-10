@@ -60,12 +60,9 @@ class Workflow(Entity):
 
     def show(self, actor, access):
         """Display the curated contract (already authorized)."""
-        st.subheader("Upstream")
-        st.code(
-            f"{self.upstream.version.url} @ {self.upstream.version.ref}",
-            language="text",
-        )
-        st.subheader("Schema")
+        st.header(self.address, divider=True)
+        st.markdown(self.desc)
+        st.markdown(f"remote url: {self.upstream.version}")
         st.code(self.config_schema, language="yaml")
         if access.can_write(actor, self.address):
             with st.expander("Config conversion code"):
@@ -73,7 +70,7 @@ class Workflow(Entity):
             with st.expander("Upstream internal schema (validation reference)"):
                 st.code(self.upstream.schema, language="yaml")
             for identifier, spec in tables_from_data(self.tables).items():
-                with st.expander(f"Table: {identifier}"):
+                with st.expander(f"Example table {identifier}:"):
                     if spec.example:
                         st.dataframe(spec.example_table, use_container_width=True)
                     st.code(
