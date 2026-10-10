@@ -15,6 +15,7 @@ import streamlit as st
 import yaml
 from streamlit_ace import st_ace
 
+from ..utils.schema_validation import schema_errors
 from ..utils.workflow_tables import TableSpec, infer_table_schema, schema_columns
 from ..utils.yaml_utils import parse_yaml
 from .table_editor import column_controls, editable_table
@@ -66,6 +67,8 @@ def table_schema_editor(
 
     spec = TableSpec(spec.fields, new_schema, example)
     with col1:
+        for message in schema_errors(new_schema):
+            st.error(f"table '{identifier}' schema: {message}")
         for message in spec.errors():
             st.error(f"table '{identifier}': {message}")
     return spec

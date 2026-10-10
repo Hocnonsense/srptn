@@ -11,6 +11,7 @@ from functools import cache
 from typing import Mapping, overload
 
 import jsonschema.validators
+from jsonschema.exceptions import SchemaError
 from jsonschema.protocols import Validator
 
 from .yaml_utils import SCIENTIFIC_FLOAT
@@ -63,3 +64,21 @@ def validation_errors(instance, schema: Mapping | None):
         f"{error.message}"
         for error in errors
     ]
+
+
+def schema_errors(schema: Mapping | None):
+    """Return meta-schema violations of ``schema`` as strings, ``[]`` if valid.
+
+    A malformed schema (for example a ``required`` list placed inside
+    ``properties``) makes jsonschema silently ignore that branch, so nested
+    content goes unvalidated; checking the schema itself surfaces the mistake.
+    """
+    if not schema:
+        return []
+    schema = sanitize_schema(schema)
+    validator = jsonschema.validators.validator_for(schema)
+    try:
+        validator.check_schema(schema)
+    except SchemaError as error:
+        return [error.message]
+    return []

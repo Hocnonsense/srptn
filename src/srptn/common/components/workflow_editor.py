@@ -23,7 +23,7 @@ from streamlit_ace import st_ace
 from ..data import Address, DataStore
 from ..data.entities.workflow import UpstreamRef, Workflow
 from ..utils.schema_inference import infer_schema
-from ..utils.schema_validation import validation_errors
+from ..utils.schema_validation import schema_errors, validation_errors
 from ..utils.snakedeploy import Version
 from ..utils.workflow_preview import PreviewResult
 from ..utils.workflow_tables import (
@@ -131,7 +131,11 @@ def workflow_editor(
     if runner_error:
         with col2:
             st.error(runner_error)
-    if runner_schema and isinstance(config, dict):
+    schema_messages = schema_errors(runner_schema)
+    for message in schema_messages:
+        with col2:
+            st.error(f"Schema error: {message}")
+    if isinstance(config, dict) and not schema_messages:
         messages = validation_errors(config, runner_schema)
         for message in messages:
             st.error(message)
