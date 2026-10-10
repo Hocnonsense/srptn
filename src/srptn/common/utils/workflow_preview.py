@@ -18,7 +18,13 @@ import yaml
 
 from .config_code import collect_files, config_workdir, run_config_code
 from .schema_validation import validation_errors
-from .workflow_tables import TABLE_EXTENSIONS, TableSpec, write_table
+from .workflow_tables import (
+    TABLE_EXTENSIONS,
+    TableSpec,
+    validate_values,
+    read_table,
+    write_table,
+)
 from .yaml_utils import load_yaml
 
 
@@ -85,15 +91,7 @@ class PreviewResult(NamedTuple):
 def _parse_file(name: str, content: bytes):
     suffix = Path(name).suffix.lower()
     if suffix in TABLE_EXTENSIONS:
-        buffer = io.BytesIO(content)
-        try:
-            if suffix == ".tsv":
-                return pl.read_csv(buffer, separator="\t")
-            if suffix == ".csv":
-                return pl.read_csv(buffer)
-            return pl.read_excel(buffer)
-        except Exception:  # noqa: BLE001 - unparseable files are skipped
-            return None
+        return read_table(io.BytesIO(content), suffix=suffix)
     if suffix in (".json", ".yaml", ".yml"):
         try:
             return load_yaml(content.decode())
@@ -124,7 +122,7 @@ def _validate_files(files: dict[str, bytes], schema_dir: Path | None, skip: set[
         parsed = _parse_file(name, content)
         if isinstance(parsed, pl.DataFrame):
             for index, row in enumerate(parsed.iter_rows(named=True)):
-                for message in validation_errors(row, schema):
+                for message in validation_errors(validate_values(row), schema):
                     errors.append(f"{name} row {index}: {message}")
         elif isinstance(parsed, (dict, list)):
             for message in validation_errors(parsed, schema):

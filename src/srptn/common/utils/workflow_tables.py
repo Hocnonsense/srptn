@@ -9,7 +9,7 @@ look like.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Mapping, NamedTuple
+from typing import Mapping, NamedTuple, IO
 
 import polars as pl
 
@@ -17,6 +17,18 @@ from .schema_validation import validation_errors
 from .yaml_utils import dump_yaml, load_yaml
 
 TABLE_EXTENSIONS = (".tsv", ".csv", ".xlsx")
+
+
+def validate_values(row: Mapping):
+    """Drop empty/null cells from a row, as Snakemake does before validation.
+
+    Snakemake's ``validate`` excludes NULL values from each record, so an empty
+    cell means "absent" (governed by the schema's ``required`` list) rather than
+    a value that must match the declared type.
+    """
+    return {
+        key: value for key, value in row.items() if value is not None and value != ""
+    }
 
 
 def _get_by_path(config, path: list[str], default=None):
@@ -30,16 +42,41 @@ def _get_by_path(config, path: list[str], default=None):
     return node
 
 
-def read_table(path: Path):
-    """Read a table by extension, or ``None`` when unreadable/unsupported."""
-    suffix = path.suffix.lower()
+def read_table(
+    source: str | Path | IO[bytes] | bytes,
+    schema: Mapping[str, pl.DataType | type[pl.DataType]] | None = None,
+    *,
+    suffix: str | None = None,
+    infer: bool = False,
+) -> pl.DataFrame | None:
+    """Read a table by extension, or ``None`` when unreadable/unsupported.
+
+    ``source`` is a path or a binary buffer/-stream; pass ``suffix`` when it is
+    not a path.  ``schema`` gives strict per-column dtype overrides; ``infer``
+    selects how the remaining columns are read.  Combining them yields four
+    modes:
+
+    ============ ===================================================
+    (None, False) every column as string (``infer_schema_length=0``),
+                  the ``dtype=str`` convention of Snakemake sample
+                  sheets: identifiers such as ``unit`` stay strings
+    (None, True)  Polars' default type inference
+    (schema, *)   ``schema`` columns keep their dtype; the rest follow
+                  ``infer`` (strings or inferred)
+    ============ ===================================================
+    """
+    kwargs: dict = dict(
+        schema_overrides=dict(schema) if schema else None,
+        infer_schema_length=None if infer else 0,
+    )
+    suffix = (suffix or getattr(source, "suffix", "")).lower()
     try:
         if suffix == ".tsv":
-            return pl.read_csv(path, separator="\t")
+            return pl.read_csv(source, separator="\t", **kwargs)
         if suffix == ".csv":
-            return pl.read_csv(path)
+            return pl.read_csv(source, **kwargs)
         if suffix == ".xlsx":
-            return pl.read_excel(path)
+            return pl.read_excel(source, **kwargs)
     except Exception:
         return None
     return None
@@ -82,7 +119,7 @@ def _suffix_table_fields(config):
 
 def _inline_table(data_path: Path | None, value: str):
     schema = None
-    example: dict = {}
+    example = {}
     if data_path is not None:
         name = Path(value).name.rsplit(".", 1)[0]
         for ext in ("yaml", "yml", "json"):
@@ -191,6 +228,6 @@ class TableSpec(NamedTuple):
                 errors.append(repr(error))
             else:
                 for index, row in enumerate(table.iter_rows(named=True)):
-                    for message in validation_errors(row, self.schema):
+                    for message in validation_errors(validate_values(row), self.schema):
                         errors.append(f"row {index}: {message}")
         return errors

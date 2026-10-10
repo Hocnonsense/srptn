@@ -15,7 +15,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import NamedTuple
 
-import polars as pl
 import streamlit as st
 import yaml
 from streamlit_ace import st_ace
@@ -28,17 +27,14 @@ from ..utils.schema_validation import validation_errors
 from ..utils.snakedeploy import Version
 from ..utils.workflow_preview import PreviewResult
 from ..utils.workflow_tables import (
-    TableSpec,
     build_tables,
-    infer_table_schema,
-    schema_columns,
     tables_from_data,
     tables_to_data,
 )
 from ..utils.yaml_utils import dump_yaml, load_yaml
+from .table_schema_editor import table_schema_editor
 
 _ACE_HEIGHT = 340
-_TABLE_ACE_HEIGHT = 220
 _DEFAULT_CODE = (
     "# `config` holds the runner-facing config as a dict.\n"
     "# Reassign `config` to produce the upstream config.\n"
@@ -150,7 +146,9 @@ def workflow_editor(
         )
         editor_key = f"{key}-table-editor-{run}"
         for name, spec in tables.items():
-            tables[name] = _table_editor(editor_key, name, spec, config)
+            tables[name] = table_schema_editor(
+                editor_key, name, spec, spec.paths(config)
+            )
 
     st.markdown("**Config conversion code** — `config` in, converted `config` out")
     code = st_ace(
@@ -208,55 +206,6 @@ def _render_preview(result: PreviewResult | None):
         for name, content in result.files.items():
             with st.expander(name):
                 st.code(content.decode("utf-8", "replace"), language="text")
-
-
-def _table_editor(key: str, identifier: str, spec: TableSpec, config):
-    """Render one table's example/schema editors and return the current spec."""
-    row_schema = spec.schema
-    example = spec.example
-    paths = spec.paths(config)
-
-    col1, col2 = st.columns(2)
-    with col1:
-        fields_label = ", ".join(".".join(map(str, field)) for field in spec.fields)
-        st.caption(f"{identifier}: {fields_label} -> {paths}")
-        if not paths:
-            st.warning("No file path declared for this table.")
-        if not example:
-            columns = schema_columns(row_schema) or ["column"]
-            example = dict.fromkeys(columns, [])
-        frame = pl.DataFrame(example)
-        edited = st.data_editor(
-            frame.to_pandas(),
-            num_rows="dynamic",
-            use_container_width=True,
-            hide_index=True,
-            key=f"{key}-{identifier}-editor",
-        )
-        new_example = pl.from_pandas(edited).to_dict(as_series=False)
-    with col2:
-        default_schema = yaml.safe_dump(
-            (row_schema if isinstance(row_schema, dict) else infer_table_schema(frame)),
-            sort_keys=False,
-        )
-        new_schema_text = st_ace(
-            default_schema,
-            language="yaml",
-            height=_TABLE_ACE_HEIGHT,
-            auto_update=False,
-            key=f"{key}-{identifier}-schema",
-        )
-        parsed, parse_error = _parse(new_schema_text)
-        new_schema = (
-            parsed if not parse_error and isinstance(parsed, dict) else row_schema
-        )
-
-    if new_example != example or new_schema != row_schema:
-        spec = TableSpec(fields=spec.fields, schema=new_schema, example=new_example)
-    with col1:
-        for message in spec.errors():
-            st.error(f"table '{identifier}': {message}")
-    return spec
 
 
 def _parse(text: str):

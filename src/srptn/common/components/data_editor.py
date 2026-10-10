@@ -1,10 +1,10 @@
 import polars as pl
 import streamlit as st
 from streamlit.delta_generator import DeltaGenerator
-from streamlit.runtime.uploaded_file_manager import UploadedFile
 from streamlit_ace import THEMES, st_ace
 
 from .ui_components import toggle_button
+from .table_editor import column_controls, editable_table
 from ..data.entities.analysis import WorkflowManager
 from ..utils.polars_utils import (
     enforce_typing,
@@ -14,72 +14,40 @@ from ..utils.polars_utils import (
 from ..utils.schema_inference import infer_schema, update_schema
 
 
-def add_column(key: str):
-    """Add a new column to the dataframe.
-
-    :param key: The key for the Streamlit session state.
-    """
-
-    def add(column: str):
-        data: pl.DataFrame = st.session_state[f"{key}-data"]
-        if column.strip() and column not in data.columns:
-            st.session_state[f"{key}-data"] = data.with_columns(
-                pl.Series(column, [""] * len(data)),
-            )
-
-    with st.popover("", icon=":material/add:", help="Add a column"):
-        column = st.text_input("Add column", key=f"{key}-add_column_text")
-        st.button(
-            "Add",
-            key=f"{key}-add_column_button",
-            on_click=add,
-            args=(column,),
-        )
-
-
-def clear_data(key: str):
+def clear_data(key: str, frame: pl.DataFrame):
     """Clear all rows of the dataframe.
 
     :param key: The key for the Streamlit session state.
+    :param frame: The current dataframe.
     """
-
-    def clear():
-        data: pl.DataFrame = st.session_state[f"{key}-data"]
-        st.session_state[f"{key}-data"] = pl.DataFrame(schema=data.schema)
-
-    st.button(
+    if st.button(
         "",
         icon=":material/mop:",
         help="Clear all entries",
         key=f"{key}-clear_data_button",
-        on_click=clear,
-    )
+    ):
+        return pl.DataFrame(schema=frame.schema), frame
 
 
-def custom_upload(key: str):
+def custom_upload(key: str, frame: pl.DataFrame):
     """Upload a custom configuration file and replace the dataframe.
 
     :param key: The key for the Streamlit session state.
+    :param frame: The current dataframe.
     """
-
-    def upload(uploaded_file: UploadedFile):
-        st.session_state[f"{key}-data"] = load_data_table(
-            uploaded_file,
-            source="upload",
-        )
-
     with st.popover("", icon=":material/upload:", help="Upload a config"):
         uploaded_file = st.file_uploader(
             "Choose a file",
             type=("xlsx", "tsv", "csv"),
             key=f"{key}-custom_upload_field",
         )
-        st.button(
-            "Confirm",
-            key=f"{key}-custom_upload_button",
-            on_click=upload,
-            args=(uploaded_file,),
-        )
+        if st.button(
+            "Confirm", key=f"{key}-custom_upload_button", disabled=uploaded_file is None
+        ):
+            assert uploaded_file is not None
+            uploaded = load_data_table(uploaded_file, source="upload")
+            if isinstance(uploaded, pl.DataFrame):
+                return uploaded, uploaded_file.name
 
 
 def data_editor(key: str):
@@ -88,36 +56,30 @@ def data_editor(key: str):
     :param key: The key for the Streamlit session state.
     """
     holders: list[DeltaGenerator] = st.session_state[f"{key}-placeholders"]
-    col1, col2, col3, col4, col5, col6 = holders[0].columns(6)
-    with col1:
-        add_column(key)
-    with col2:
-        rename_column(key)
-    with col3:
-        delete_column(key)
-    with col4:
-        custom_upload(key)
-    with col5:
-        data_fill(key)
-    with col6:
-        clear_data(key)
+    with holders[0]:
+        data, change = column_controls(
+            key,
+            st.session_state[f"{key}-data"],
+            extras=dict(upload=custom_upload, fill=data_fill, clear=clear_data),
+        )
+    if change:
+        st.session_state[f"{key}-data"] = data
     process_user_code(key)
     dataset_ids = list(st.session_state.get("workflow-meta-datasets-sheets", {}))
-    holders[2].data_editor(
-        st.session_state[f"{key}-data"],
-        use_container_width=True,
-        num_rows="dynamic",
-        on_change=update_data,
-        args=(key,),
-        key=f"{key}-editor",
-        column_config={
-            "datasetid": st.column_config.SelectboxColumn(
-                "datasetid",
-                options=dataset_ids,
-                default=dataset_ids[0] if dataset_ids else None,
-            ),
-        },
-    )
+    with holders[2]:
+        editable_table(
+            f"{key}-editor",
+            st.session_state[f"{key}-data"],
+            on_change=update_data,
+            args=(key,),
+            column_config={
+                "datasetid": st.column_config.SelectboxColumn(
+                    "datasetid",
+                    options=dataset_ids,
+                    default=dataset_ids[0] if dataset_ids else None,
+                ),
+            },
+        )
     validate_data(key)
     # FIXME: use a long table with: (id), datasetid, filename, *meta
     # to select sample from it. Define global indexes, use a list of
@@ -207,21 +169,20 @@ def validate_and_cast_columns(
     return column_to_add
 
 
-def data_fill(key: str):
+def data_fill(key: str, frame: pl.DataFrame):
     """Fill the configuration file with data from a selected dataset."""
     with st.popover("", icon=":material/library_add:"):
-        selected = None
-        if "workflow-meta-datasets-sheets" in st.session_state:
-            dataset = st.session_state.get("workflow-meta-datasets-sheets")
-            if dataset:
-                selected = st.selectbox(
-                    "Select a dataset",
-                    options=list(dataset),
-                    key=f"{key}-fill_data_select",
-                )
-        if selected and dataset is not None:
+        dataset = st.session_state.get("workflow-meta-datasets-sheets")
+        if not dataset:
+            return
+        selected = st.selectbox(
+            "Select a dataset",
+            options=list(dataset),
+            key=f"{key}-fill_data_select",
+        )
+        if selected:
             data_selected = dataset[selected]
-            data_modified: pl.DataFrame = st.session_state[f"{key}-data"].clone()
+            data_modified: pl.DataFrame = frame.clone()
 
             fill_pairs = prepare_fill_pairs(key, data_selected)
 
@@ -266,7 +227,7 @@ def data_fill(key: str):
             )
 
             if st.button("Confirm", key=f"{key}-fill_button"):
-                st.session_state[f"{key}-data"] = data_modified.clone()
+                return data_modified, [pair[1] for pair in fill_pairs]
 
 
 def data_selector(
@@ -334,30 +295,6 @@ def data_selector(
     with col2:
         show_data: bool = toggle_button("", key, icon=":material/keyboard_arrow_down:")
     return input_value, show_data
-
-
-def delete_column(key: str):
-    """Delete a column from the dataframe.
-
-    :param key: The key for the Streamlit session state.
-    """
-
-    def delete(selected: str):
-        data: pl.DataFrame = st.session_state[f"{key}-data"]
-        st.session_state[f"{key}-data"] = data.drop(selected)
-
-    with st.popover("", icon=":material/remove:", help="Remove a column"):
-        selected = st.selectbox(
-            "Select column to delete",
-            options=st.session_state[f"{key}-data"].columns,
-            key=f"{key}-delete_column_select",
-        )
-        st.button(
-            "Delete",
-            key=f"{key}-delete_column_button",
-            on_click=delete,
-            args=(selected,),
-        )
 
 
 def execute_custom_code(
@@ -511,39 +448,6 @@ def process_user_code(key: str):
                 key=f"{key}-advanced_manipulation_preview_window",
             )
             validate_data(key, preview_data)
-
-
-def rename_column(key: str):
-    """Rename a column in the dataframe.
-
-    :param key: The key for the Streamlit session state that identifies the data.
-    """
-
-    def rename(selected: str, renamed: str):
-        data: pl.DataFrame = st.session_state[f"{key}-data"]
-        if rename and renamed.strip():
-            st.session_state[f"{key}-data"] = data.rename({selected: renamed})
-
-    with st.popover("", icon=":material/edit:", help="Rename a column"):
-        selected = st.selectbox(
-            "Select column to rename",
-            options=st.session_state[f"{key}-data"].columns,
-            key=f"{key}-rename_column_select",
-        )
-        renamed = st.text_input(
-            "Rename to",
-            value=selected,
-            key=f"{key}-rename_column_text",
-        )
-        st.button(
-            "Rename",
-            key=f"{key}-rename_column_button",
-            on_click=rename,
-            args=(
-                selected,
-                renamed,
-            ),
-        )
 
 
 def update_data(key: str):
