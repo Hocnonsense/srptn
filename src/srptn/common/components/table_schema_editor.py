@@ -35,9 +35,9 @@ def table_schema_editor(
     revision = st.session_state.get(f"{prefix}-revision", 0)
 
     col1, col2 = st.columns(2)
+    fields_label = ", ".join(".".join(map(str, field)) for field in spec.fields)
+    st.caption(f"{identifier}: {fields_label} -> {list(paths)}")
     with col1:
-        fields_label = ", ".join(".".join(map(str, field)) for field in spec.fields)
-        st.caption(f"{identifier}: {fields_label} -> {list(paths)}")
         if not paths:
             st.warning("No file path declared for this table.")
         if not example:

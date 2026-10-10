@@ -95,7 +95,7 @@ def page_new_workflow(actor: Actor):
     if version is None:
         return
 
-    if st.button("Deploy upstream", key=f"{_KEY}-deploy"):
+    if st.button("Deploy", key=f"{_KEY}-deploy"):
         _deploy_upstream(access, actor, address, cached, version)
 
     context = _contexts().get(str(address))

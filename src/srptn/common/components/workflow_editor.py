@@ -59,7 +59,7 @@ class DeployInitialState(NamedTuple):
         data_path: Path | None = None,
     ):
         config_text = config.read_text()
-        config_dict = load_yaml(config_text)
+        config_dict = load_yaml(config_text) or {}
         internal = schema or infer_schema(config_dict)
         internal_text = dump_yaml(internal)
         tables_text = tables_to_data(build_tables(config_dict, data_path))
