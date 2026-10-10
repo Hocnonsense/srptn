@@ -10,13 +10,12 @@ from __future__ import annotations
 
 from typing import Sequence
 
-import polars as pl
 import streamlit as st
 import yaml
 from streamlit_ace import st_ace
 
 from ..utils.schema_validation import schema_errors
-from ..utils.workflow_tables import TableSpec, infer_table_schema, schema_columns
+from ..utils.workflow_tables import TableSpec, infer_table_schema
 from ..utils.yaml_utils import parse_yaml
 from .table_editor import column_controls, editable_table
 
@@ -34,10 +33,7 @@ def table_schema_editor(
     prefix = f"{key}-{identifier}"
     data_key = f"{prefix}-data"
     if data_key not in st.session_state:
-        columns = list(spec.example) or schema_columns(row_schema) or ["column"]
-        st.session_state[data_key] = pl.DataFrame(
-            spec.example or dict.fromkeys(columns, [])
-        )
+        st.session_state[data_key] = spec.example_table
 
     col1, col2 = st.columns(2)
     fields_label = ", ".join(".".join(map(str, field)) for field in spec.fields)

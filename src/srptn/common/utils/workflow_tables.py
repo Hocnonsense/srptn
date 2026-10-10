@@ -235,7 +235,9 @@ class TableSpec(NamedTuple):
 
     @property
     def example_table(self):
-        return pl.DataFrame(self.example)
+        return pl.DataFrame(
+            pl.DataFrame(self.example or dict.fromkeys(schema_columns(self.schema), []))
+        )
 
     def paths(self, config):
         """The distinct config values (file paths) for this table's fields."""
