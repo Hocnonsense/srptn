@@ -156,6 +156,34 @@ def build_tables(config, data_path: Path | None = None):
     return tables
 
 
+def add_table_fields(
+    config,
+    fields: list[str],
+    tables: dict[str, TableSpec],
+    data_path: Path | None = None,
+):
+    """Merge ``paths`` into ``tables`` as table field bindings, by file basename.
+
+    Each path is a dot-separated config key; its value is resolved in ``config``
+    and the table id is the basename stem of that file.  Paths resolving to the
+    same id share one table, whose row schema and example come from the first
+    field's file (mirroring :func:`build_tables`).  Unknown or non-string paths
+    are skipped.
+    """
+    value = _get_by_path(config, fields)
+    if not fields or not isinstance(value, str) or not value:
+        return
+    identifier = Path(value).name.rsplit(".", 1)[0] or "table"
+    spec: TableSpec | None = tables.get(identifier)
+    if spec is None:
+        schema, example = _inline_table(data_path, value)
+        tables[identifier] = TableSpec(fields=[fields], schema=schema, example=example)
+    elif fields not in spec.fields:
+        tables[identifier] = TableSpec(
+            fields=[*spec.fields, fields], schema=spec.schema, example=spec.example
+        )
+
+
 def tables_from_data(data: str):
     """Rebuild a table sidecar from its YAML text."""
     return {
