@@ -57,19 +57,17 @@ def data_editor(key: str):
     """
     holders: list[DeltaGenerator] = st.session_state[f"{key}-placeholders"]
     with holders[0]:
-        data, change = column_controls(
+        change = column_controls(
             key,
-            st.session_state[f"{key}-data"],
             extras=dict(upload=custom_upload, fill=data_fill, clear=clear_data),
         )
-    if change:
-        st.session_state[f"{key}-data"] = data
     process_user_code(key)
+    reset = bool(change) or st.session_state.pop(f"{key}-reset", False)
     dataset_ids = list(st.session_state.get("workflow-meta-datasets-sheets", {}))
     with holders[2]:
-        edited = editable_table(
-            f"{key}-editor",
-            st.session_state[f"{key}-data"],
+        editable_table(
+            key,
+            reset=reset,
             column_config={
                 "datasetid": st.column_config.SelectboxColumn(
                     "datasetid",
@@ -78,7 +76,6 @@ def data_editor(key: str):
                 ),
             },
         )
-    st.session_state[f"{key}-data"] = edited
     validate_data(key)
     # FIXME: use a long table with: (id), datasetid, filename, *meta
     # to select sample from it. Define global indexes, use a list of
@@ -270,6 +267,7 @@ def data_selector(
         )
 
         st.session_state[data_key_changed] = input_value
+        st.session_state[f"{key}-reset"] = True
 
     if not isinstance(st.session_state[data_key], pl.DataFrame):
         # st.error reported in load_data_table
@@ -424,6 +422,7 @@ def process_user_code(key: str):
                     key,
                     user_code,
                 )
+                st.session_state[f"{key}-reset"] = True
 
             st.button(
                 "",
@@ -464,7 +463,7 @@ def validate_data(key: str, data: pl.DataFrame | None = None):
             return
 
     data_dict = data.to_dict(as_series=False)
-    schema = st.session_state.get(f"{key}-schema")
+    schema: dict | None = st.session_state.get(f"{key}-schema")
     if not schema:
         st.error(f"No schema found for key: {key}")
         return

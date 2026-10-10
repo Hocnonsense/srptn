@@ -30,9 +30,13 @@ def table_schema_editor(
 ):
     """Render one table's example/schema editors and return the current spec."""
     row_schema = spec.schema
-    example = spec.example
     prefix = f"{key}-{identifier}"
-    revision = st.session_state.get(f"{prefix}-revision", 0)
+    data_key = f"{prefix}-data"
+    if data_key not in st.session_state:
+        columns = list(spec.example) or schema_columns(row_schema) or ["column"]
+        st.session_state[data_key] = pl.DataFrame(
+            spec.example or dict.fromkeys(columns, [])
+        )
 
     col1, col2 = st.columns(2)
     fields_label = ", ".join(".".join(map(str, field)) for field in spec.fields)
@@ -40,18 +44,9 @@ def table_schema_editor(
     with col1:
         if not paths:
             st.warning("No file path declared for this table.")
-        if not example:
-            columns = schema_columns(row_schema) or ["column"]
-            example = dict.fromkeys(columns, [])
-        frame, change = column_controls(prefix, pl.DataFrame(example))
-        if change:
-            example = frame.to_dict(as_series=False)
-            spec = TableSpec(spec.fields, row_schema, example)
-            revision += 1
-            st.session_state[f"{prefix}-revision"] = revision
-        frame = pl.DataFrame(example)
-        edited = editable_table(f"{prefix}-editor-{revision}", frame)
-        new_example = edited.to_dict(as_series=False)
+        change = column_controls(prefix)
+        frame = editable_table(prefix, reset=bool(change))
+        example = frame.to_dict(as_series=False)
     with col2:
         default_schema = yaml.safe_dump(
             (row_schema if isinstance(row_schema, dict) else infer_table_schema(frame)),
@@ -69,8 +64,7 @@ def table_schema_editor(
             parsed if not parse_error and isinstance(parsed, dict) else row_schema
         )
 
-    if new_example != example or new_schema != row_schema:
-        spec = TableSpec(fields=spec.fields, schema=new_schema, example=new_example)
+    spec = TableSpec(spec.fields, new_schema, example)
     with col1:
         for message in spec.errors():
             st.error(f"table '{identifier}': {message}")

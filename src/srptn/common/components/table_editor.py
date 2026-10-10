@@ -1,9 +1,11 @@
 """Reusable editable-table widgets.
 
-``column_controls`` renders icon add/rename/remove-column popovers and threads
-the frame through them (plus any ``extras``); ``editable_table`` wraps
-``st.data_editor``.  Both are plain Streamlit widgets shared by the analysis and
-curation flows and carry no schema or persistence logic.
+A table is identified by ``key``; its current data lives in
+``st.session_state[f"{key}-data"]``.  ``column_controls`` renders icon
+add/rename/remove/reorder popovers that edit that entry (plus any ``extras``);
+``editable_table`` wraps ``st.data_editor`` and returns the edited frame.  Both
+are plain Streamlit widgets shared by the analysis and curation flows and carry
+no schema or persistence logic.
 """
 
 from __future__ import annotations
@@ -23,54 +25,68 @@ fire.
 
 def column_controls(
     key: str,
-    frame: pl.DataFrame,
     *,
     controls: Mapping[str, Control] | None = None,
     extras: Mapping[str, Control] | None = None,
 ):
-    """Render icon add/rename/remove-column popovers for ``frame``.
+    """Render icon column popovers for ``st.session_state[f"{key}-data"]``.
 
-    Returns the (possibly modified) table together with the changes applied,
-    keyed by control name (``add``/``rename``/``remove``, plus any ``extras``
-    key).  The mapping is empty when nothing changed.
+    Returns the changes applied, keyed by control name (``add``/``rename``/
+    ``remove``/``move``, plus any ``extras`` key).  The mapping is empty when
+    nothing changed.
 
-    ``controls`` replaces the three default controls; ``extras`` renders
-    additional controls next to them.  Each follows :data:`Control` and is
-    threaded the frame produced so far.
+    ``controls`` replaces the default controls; ``extras`` renders additional
+    controls next to them.  Each follows :data:`Control` and is threaded the
+    current ``{key}-data`` frame.
     """
     changes: dict[str, Any] = {}
     calls = dict(controls or _default_controls) | dict(extras or {})
     holders = st.columns(len(calls))
     for holder, call in zip(holders, calls):
         with holder:
-            ret = calls[call](key, frame)
+            ret = calls[call](key, st.session_state[f"{key}-data"])
         if ret is not None:
-            frame, changes[call] = ret
-    return frame, changes
+            st.session_state[f"{key}-data"], changes[call] = ret
+    return changes
 
 
 def editable_table(
     key: str,
-    frame: pl.DataFrame,
     *,
     column_config: Mapping | None = None,
     drop_empty: bool = True,
-):
-    """Shared ``st.data_editor`` call; returns the edit as a Polars frame.
+    reset: bool = False,
+) -> pl.DataFrame:
+    """Render ``st.data_editor`` for ``st.session_state[f"{key}-data"]``.
+
+    The current data lives in ``{key}-data``; the edited result is written back
+    there and returned.  Edits accumulate against a separate stable **base**
+    (``{key}-base``) rather than re-feeding ``{key}-data`` as the editor input,
+    which would make edits lag by one run.  Pass ``reset=True`` when the table
+    is replaced programmatically (column change, upload, fill, clear) so the
+    base is re-seeded and the widget rebuilt.
 
     With ``drop_empty`` (the default) rows whose cells are all blank are
     removed, so empty rows added in the editor are not persisted.
     """
+    data_key = f"{key}-data"
+    base_key = f"{key}-base"
+    revision_key = f"{key}-revision"
+    if reset or base_key not in st.session_state:
+        st.session_state[base_key] = st.session_state[data_key]
+        st.session_state[revision_key] = st.session_state.get(revision_key, 0) + 1
     edited = st.data_editor(
-        frame.to_pandas(),
+        st.session_state[base_key].to_pandas(),
         num_rows="dynamic",
         use_container_width=True,
         hide_index=True,
-        key=key,
+        key=f"{key}-{st.session_state[revision_key]}",
         column_config=column_config,
     )
     result = pl.from_pandas(edited)
-    return _drop_empty_rows(result) if drop_empty else result
+    result = _drop_empty_rows(result) if drop_empty else result
+    st.session_state[data_key] = result
+    return result
 
 
 def _drop_empty_rows(frame: pl.DataFrame) -> pl.DataFrame:
