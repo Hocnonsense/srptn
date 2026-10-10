@@ -1,3 +1,4 @@
+import io
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -254,9 +255,13 @@ class Analysis(Entity):
         if self.analysis_run_manager is None:
             self.analysis_run_manager = AnalysisRuntimeManager(self.address)
         st.header(self.address, divider=True)
+        # TODO: show edit and run time
         st.markdown(self.desc)
 
-        parent_tabs = st.tabs(["Datasets", "Logs"])
+        if self.workflow_manager.log_path:
+            parent_tabs = st.tabs(["Datasets", "Logs"])
+        else:
+            parent_tabs = st.tabs(["Datasets"])
         with parent_tabs[0]:
             if self.datasets:
                 dataset_tabs = st.tabs([str(data.address) for data in self.datasets])
@@ -265,8 +270,9 @@ class Analysis(Entity):
                 ):
                     with dataset_tab:
                         st.dataframe(dataset.sheet)
-        with parent_tabs[1]:
-            log_selector(self.workflow_manager)
+        if self.workflow_manager.log_path:
+            with parent_tabs[1]:
+                log_selector(self.workflow_manager)
 
         c1, c2 = st.columns([0.21, 0.79])
         if self.can_run(actor, access) and c1.button(
@@ -320,23 +326,36 @@ class Analysis(Entity):
         for position, row in enumerate(index.iter_rows(named=True)):
             workspace.store_sheet(sheets[row["datasetid"]], f"input/sheet-{position}")
 
-    def store(self, data_store: DataStore):
-        """Save analysis state to storage."""
+    def store(self, data_store: DataStore, files: dict[str, bytes] | None = None):
+        """Save analysis state to storage.
+
+        ``files`` are pre-generated workspace files -- a curated workflow's
+        converted config and declared tables; when given, the legacy
+        scan-and-guess path is skipped.
+        """
         workspace = data_store.workspace(self.address)
         self.write_entity(workspace)
-        dataset_entities = {
-            str(dataset.address): dataset.list_files(FileType.DATA)["name"].to_list()
-            for dataset in self.datasets
-            if dataset.sheet is not None
-        }
 
-        self.workflow_manager.update_configs_from_session_state()
-        # FIXME: only update tables for 'workflow-config-*-data'
-        for path_obj in self.workflow_manager.workspace.data_path.rglob("*"):
-            if path_obj.is_file() and path_obj.suffix in (".tsv", ".csv", ".xlsx"):
-                self.update_data_paths(path_obj, dataset_entities)
-        for key in st.session_state:
-            if key.startswith("workflow-"):
+        if files is not None:
+            for name, content in files.items():
+                workspace.store_file(io.BytesIO(content), name, file_type=FileType.DATA)
+        else:  # TODO: remove this legacy path once the new workflow is fully adopted
+            dataset_entities = {
+                str(dataset.address): dataset.list_files(FileType.DATA)[
+                    "name"
+                ].to_list()
+                for dataset in self.datasets
+                if dataset.sheet is not None
+            }
+
+            self.workflow_manager.update_configs_from_session_state()
+            # FIXME: only update tables for 'workflow-config-*-data'
+            for path_obj in self.workflow_manager.workspace.data_path.rglob("*"):
+                if path_obj.is_file() and path_obj.suffix in (".tsv", ".csv", ".xlsx"):
+                    self.update_data_paths(path_obj, dataset_entities)
+
+        for key in list(st.session_state):
+            if isinstance(key, str) and key.startswith("workflow-"):
                 del st.session_state[key]
         st.session_state["workflow-refresh"] = True  # Removing cache of the workflow
 

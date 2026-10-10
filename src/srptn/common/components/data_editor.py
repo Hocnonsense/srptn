@@ -3,15 +3,8 @@ import streamlit as st
 from streamlit.delta_generator import DeltaGenerator
 from streamlit_ace import THEMES, st_ace
 
-from .ui_components import toggle_button
 from .table_editor import column_controls, editable_table
-from ..data.entities.analysis import WorkflowManager
-from ..utils.polars_utils import (
-    enforce_typing,
-    load_data_table,
-    merge_dataframes,
-)
-from ..utils.schema_inference import infer_schema, update_schema
+from ..utils.polars_utils import load_data_table, merge_dataframes
 
 
 def clear_data(key: str, frame: pl.DataFrame):
@@ -224,74 +217,6 @@ def data_fill(key: str, frame: pl.DataFrame):
 
             if st.button("Confirm", key=f"{key}-fill_button"):
                 return data_modified, [pair[1] for pair in fill_pairs]
-
-
-def data_selector(
-    label: str,
-    value: str,
-    key: str,
-    workflow_manager: WorkflowManager,
-):
-    """Create a data selector widget in Streamlit.
-
-    :param label: The label for the text input widget.
-    :param value: The initial value of the text input.
-    :param key: The key to store the text input value in Streamlit's session state.
-    :param workflow_manager: An object providing data-related functions.
-    :return: A tuple containing the input value and a boolean indicating whether to show the data editor.
-    """
-    st.text(label)
-    col1, col2 = st.columns([9, 1])
-    with col1:
-        input_value = st.text_input(
-            label=label,
-            value=value,
-            key=key,
-            disabled=True,
-            label_visibility="collapsed",
-        )
-    data_key = f"{key}-data"
-    data_key_changed = f"{key}-data_token"
-    data_schema_key = f"{key}-schema"
-
-    if (
-        data_key not in st.session_state
-        or data_key_changed not in st.session_state
-        or st.session_state[data_key_changed] != input_value
-    ):
-        if data_schema_key in st.session_state:
-            st.session_state.pop(data_schema_key)
-
-        st.session_state[data_key] = load_data_table(
-            workflow_manager.workspace.data_path / input_value,
-        )
-
-        st.session_state[data_key_changed] = input_value
-        st.session_state[f"{key}-reset"] = True
-
-    if not isinstance(st.session_state[data_key], pl.DataFrame):
-        # st.error reported in load_data_table
-        return input_value, False
-    st.session_state[data_key] = st.session_state[data_key].with_columns(
-        datasetid=pl.lit(""),
-    )
-
-    if data_schema_key not in st.session_state:
-        data_schema = workflow_manager.get_schema(value.split("/")[-1].split(".")[0])
-        data_config = st.session_state[data_key].to_dict(as_series=False)
-        if data_schema:
-            final_schema = update_schema(data_schema, data_config)
-        else:
-            final_schema = infer_schema(data_config)
-        st.session_state[data_schema_key] = final_schema
-        st.session_state[data_key] = enforce_typing(
-            st.session_state[data_key],
-            final_schema,
-        )
-
-    with col2:
-        show_data: bool = toggle_button("", key, icon=":material/keyboard_arrow_down:")
-    return input_value, show_data
 
 
 def execute_custom_code(

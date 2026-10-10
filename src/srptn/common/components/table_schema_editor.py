@@ -34,12 +34,15 @@ def table_schema_editor(
     identifier: str,
     spec: TableSpec,
     paths: Sequence[str],
+    *,
+    read_only_schema: bool = False,
 ):
     """Render one table's example/schema editors and return the current spec.
 
     The schema (right) is authoritative and read first; the example frame (left)
     is cast to its declared column types before rendering, so the schema always
-    steers the table.
+    steers the table.  With ``read_only_schema`` the schema is shown for
+    reference only -- the runner must not change a curated workflow's contract.
     """
     row_schema = spec.schema
     prefix = f"{key}-{identifier}"
@@ -47,29 +50,32 @@ def table_schema_editor(
     if data_key not in st.session_state:
         st.session_state[data_key] = spec.example_table
 
-    col1, col2 = st.columns(2)
+    if not paths:
+        return spec
     fields_label = ", ".join(".".join(map(str, field)) for field in spec.fields)
     st.caption(f"{identifier}: {fields_label} -> {list(paths)}")
+    col1, col2 = st.columns(2)
     with col2:
-        default_schema = yaml.safe_dump(
-            (
-                row_schema
-                if isinstance(row_schema, dict)
-                else infer_table_schema(st.session_state[data_key])
-            ),
-            sort_keys=False,
+        base_schema = (
+            row_schema
+            if isinstance(row_schema, dict)
+            else infer_table_schema(st.session_state[data_key])
         )
-        new_schema_text = st_ace(
-            default_schema,
-            language="yaml",
-            height=_TABLE_ACE_HEIGHT,
-            auto_update=False,
-            key=f"{prefix}-schema",
-        )
-        parsed, parse_error = parse_yaml(new_schema_text)
-        new_schema = (
-            parsed if not parse_error and isinstance(parsed, dict) else row_schema
-        )
+        if read_only_schema:
+            st.code(yaml.safe_dump(base_schema, sort_keys=False), language="yaml")
+            new_schema = base_schema
+        else:
+            new_schema_text = st_ace(
+                yaml.safe_dump(base_schema, sort_keys=False),
+                language="yaml",
+                height=_TABLE_ACE_HEIGHT,
+                auto_update=False,
+                key=f"{prefix}-schema",
+            )
+            parsed, parse_error = parse_yaml(new_schema_text)
+            new_schema = (
+                parsed if not parse_error and isinstance(parsed, dict) else row_schema
+            )
 
     # The schema steers the table: cast the frame to its declared column types,
     # rebuilding the editor only when those types change.
@@ -83,8 +89,6 @@ def table_schema_editor(
         )
 
     with col1:
-        if not paths:
-            st.warning("No file path declared for this table.")
         change = column_controls(prefix)
         frame = editable_table(prefix, reset=bool(change) or retyped)
         frame, _ = coerce_frame(frame, new_schema)

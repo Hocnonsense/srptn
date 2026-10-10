@@ -1,13 +1,18 @@
 import streamlit as st
 
+
 from ..access.store import AccessStore
 from ..accounts.policy import Actor
 from ..data import Address
 from ..data.entities.analysis import WorkflowManager
+from ..data.entities.workflow import Workflow
 from ..data.fs import FSDataStore
 from ..utils.snakedeploy import CachedWorkflowManager, RepoRefs, Version
 from ..utils.schema_inference import infer_schema, update_schema
-from .config_editor import ace_config_editor, config_editor
+from ..utils.workflow_tables import TableSpec, tables_from_data
+from ..utils.yaml_utils import load_yaml
+from .config_editor import ace_config_editor, create_form
+from .table_schema_editor import table_schema_editor
 from .ui_components import persistent_text_input
 
 auto_open_script = """
@@ -54,6 +59,7 @@ _SIGNATURE = "workflow-meta-refs-signature"
 
 _SELECTED_MANAGER = "workflow-selected-manager"
 _SELECTED_VERSION = "workflow-selected-version"
+_SELECTED_WORKFLOW = "workflow-selected-entity"
 
 
 def workflow_selector(
@@ -71,6 +77,55 @@ def workflow_selector(
         return _deploy(cached, access, actor, address, version)
     if st.session_state.get(_SELECTED_VERSION) == version.selection(address):
         return st.session_state.get(_SELECTED_MANAGER)
+
+
+def workflow_picker(
+    access: AccessStore,
+    actor: Actor,
+    address: Address,
+    data_store: FSDataStore,
+):
+    """Pick a readable curated Workflow and deploy its pinned upstream on demand.
+
+    Returns ``(workflow, manager)`` once a workflow is selected, where
+    ``manager`` is ``None`` until its upstream has been deployed.
+    """
+    workflows = access.entities(actor, Workflow)
+    if not workflows:
+        st.warning("No Workflow found")
+        return
+    names = {str(workflow.address): workflow for workflow in workflows}
+    selected = st.selectbox(
+        "Select workflow", names, index=None, key="workflow-select-source"
+    )
+    if selected is None:
+        return
+    workflow = names[selected]
+    if st.session_state.get(_SELECTED_WORKFLOW) == str(workflow.address):
+        return workflow, st.session_state.get(_SELECTED_MANAGER)
+    if st.button("Deploy", key="workflow-select-deploy"):
+        return workflow, _deploy_curated(workflow, access, actor, address, data_store)
+    return workflow, None
+
+
+def _deploy_curated(
+    workflow: Workflow,
+    access: AccessStore,
+    actor: Actor,
+    address: Address,
+    data_store: FSDataStore,
+):
+    """Deploy a curated workflow's pinned upstream into the analysis workspace."""
+    for key in list(st.session_state):
+        if isinstance(key, str) and key.startswith("workflow-config-"):
+            del st.session_state[key]
+    workspace = access.workspace(actor, address)
+    cached = CachedWorkflowManager(data_store)
+    manager = WorkflowManager.deploy(workspace, workflow.upstream.version, cached)
+    if manager is not None:
+        st.session_state[_SELECTED_MANAGER] = manager
+        st.session_state[_SELECTED_WORKFLOW] = str(workflow.address)
+    return manager
 
 
 def _select_repository(cached: CachedWorkflowManager):
@@ -289,11 +344,16 @@ def _deploy(
     return manager
 
 
-def workflow_editor(workflow_manager: WorkflowManager):
-    """Create and edit the configuration of a workflow.
+def workflow_editor(workflow: Workflow):
+    """Edit a curated workflow's runner-facing config and declared tables.
 
-    :param workflow: The workflow object containing URL, tag, and branch information.
-    :return: The temporary directory where the workflow is deployed.
+    The ``Workflow`` contract is authoritative: config/schema come from the
+    entity (never the deployed repository), the config never loads workspace
+    files, and the declared tables are edited in memory and written only at
+    store time.
+
+    :returns: ``(config, tables)`` -- the edited config mapping and the
+        ``{identifier: TableSpec}`` mapping.
     """
     config_viewer = st.radio(
         "Configuration editor mode",
@@ -303,17 +363,12 @@ def workflow_editor(workflow_manager: WorkflowManager):
 
     st.divider()
     if st.session_state.get("workflow-config-form") is None:
-        config = workflow_manager.get_config()
-        if config is None:
-            config = {}
-        elif not isinstance(config, dict):
+        config = load_yaml(workflow.config) or {}
+        if not isinstance(config, dict):
             st.error("Workflow configuration must be a YAML mapping.")
-            return
-        config_schema = workflow_manager.get_schema("config")
-        if config_schema:
-            final_schema = update_schema(config_schema, config)
-        else:
-            final_schema = infer_schema(config)
+            return config, None
+        schema = load_yaml(workflow.config_schema) or {}
+        final_schema = update_schema(schema, config) if schema else infer_schema(config)
         st.session_state["workflow-config-form"] = config
         st.session_state["workflow-config-form-schema"] = final_schema
         st.session_state["workflow-config-form-valid"] = {}
@@ -322,6 +377,57 @@ def workflow_editor(workflow_manager: WorkflowManager):
         final_schema = st.session_state["workflow-config-form-schema"]
 
     if config_viewer == "Form":
-        config_editor(config, final_schema, workflow_manager)
+        create_form(config, final_schema, "workflow-config-")
     else:
-        ace_config_editor(config, final_schema, workflow_manager)
+        parsed = ace_config_editor(config, final_schema)
+        if parsed is not None:
+            config = st.session_state["workflow-config-form"] = parsed
+
+    key = f"workflow-analysis-{workflow.address}"
+    tables_key = f"{key}-tables"
+    if tables_key not in st.session_state:
+        st.session_state[tables_key] = tables_from_data(workflow.tables)
+    tables = st.session_state[tables_key]
+    return config, _declared_tables(key, config, tables)
+
+
+def _declared_tables(key: str, config, tables: dict[str, TableSpec]):
+    """Render each declared table path as its own in-memory editor.
+
+    Config fields that resolve to the same file share one example; every
+    distinct file path is edited (and later written) separately, so the result
+    is keyed by path.  A path may only carry one row schema: two declarations
+    that disagree are a contract error and are refused rather than silently
+    overwritten (one file cannot hold two schemas).  The row schema stays
+    read-only -- it is part of the curated contract, not runner input.
+    """
+    by_path: dict[str, TableSpec] = {}
+    for spec in tables.values():
+        for field in spec.fields:
+            paths = TableSpec([field], spec.schema, spec.example).paths(config)
+            if not paths:
+                continue
+            path = paths[0]
+            group = by_path.get(path)
+            if group is None:
+                by_path[path] = TableSpec([field], spec.schema, spec.example)
+            elif group.schema != spec.schema:
+                st.error(
+                    f"Conflicting schemas declared for {path}: "
+                    f"{'.'.join(map(str, group.fields[0]))} and "
+                    f"{'.'.join(map(str, field))} disagree. "
+                    "A file can only have one row schema."
+                )
+                st.stop()
+            else:
+                by_path[path] = TableSpec(
+                    [*group.fields, field], group.schema, group.example
+                )
+    if not by_path:
+        return {}
+    st.markdown("**Declared tables** — editable example (left) vs row schema (right)")
+    for path, spec in by_path.items():
+        by_path[path] = table_schema_editor(
+            key, path, spec, [path], read_only_schema=True
+        )
+    return by_path

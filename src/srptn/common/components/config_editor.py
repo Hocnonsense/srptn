@@ -2,65 +2,37 @@ import re
 
 import streamlit as st
 import yaml
-from polars import DataFrame
 from streamlit_ace import st_ace
 from streamlit_tags import st_tags
 
-from .data_editor import data_editor, data_selector
-from ..data.entities.analysis import WorkflowManager
 from ..utils.schema_inference import get_property_type
 from ..utils.yaml_utils import load_yaml, dump_yaml
 
 
-def ace_config_editor(
-    config: dict,
-    final_schema: dict,
-    workflow_manager: WorkflowManager,
-):
+def ace_config_editor(config: dict, final_schema: dict):
     """Edit a configuration file using the ACE editor in the Streamlit app.
 
-    :param config: The configuration dictionary to be edited.
-    :param final_schema: The schema that defines the structure and types of the config.
-    :param workflow_manager: An object providing data-related functions.
+    Returns the parsed configuration, or ``None`` when the text is not a YAML
+    mapping; the caller decides where to persist it.
     """
     value = st_ace(dump_yaml(config), language="yaml")
     try:
         parsed_config = None if value is None else load_yaml(value)
     except yaml.YAMLError as error:
         st.error(f"Error parsing config YAML: {error}")
-        return
+        return None
     if parsed_config is None:
         parsed_config = {}
     if not isinstance(parsed_config, dict):
         st.error("Workflow configuration must be a YAML mapping.")
-        return
-    create_form(
-        parsed_config,
-        final_schema,
-        workflow_manager,
-        "workflow-config-",
-        ace_editor=True,
-    )
-
-
-def config_editor(
-    config: dict,
-    final_schema: dict,
-    workflow_manager: WorkflowManager,
-):
-    """Edit a configuration file in the Streamlit app using input elements.
-
-    :param config: The configuration dictionary to be edited.
-    :param final_schema: The schema that defines the structure and types of the config.
-    :param workflow_manager: An object providing data-related functions.
-    """
-    create_form(config, final_schema, workflow_manager, "workflow-config-")
+        return None
+    create_form(parsed_config, final_schema, "workflow-config-", ace_editor=True)
+    return parsed_config
 
 
 def create_form(
     config: dict,
     schema: dict,
-    workflow_manager: WorkflowManager,
     parent_key: str = "",
     *,
     ace_editor: bool = False,
@@ -69,7 +41,6 @@ def create_form(
 
     :param config: The configuration dictionary to populate the form.
     :param schema: The schema defining the structure and validation rules for the config.
-    :param workflow_manager: An object providing data-related functions.
     :param parent_key: A key used to track nested configuration items, defaults to "".
     :param ace_editor: Whether the form is used with the ACE editor, defaults to False.
     """
@@ -82,20 +53,14 @@ def create_form(
             input_dict = schema[prop_key].get(key)
             if not input_dict:
                 continue
-            only_validation = ace_editor and not (
-                input_dict["type"] == "string"
-                and value
-                and value.endswith((".tsv", ".csv", ".xlsx"))
-            )
             # input_element is self-contained and returns to config in session-state
             get_input_element(
                 key,
                 value,
                 input_dict,
                 unique_element_id,
-                workflow_manager,
                 required=key in required_fields,
-                ace_editor=only_validation,
+                ace_editor=ace_editor,
             )
         else:
             new_tabs.append((key, value))
@@ -111,16 +76,14 @@ def create_form(
                 updated_key = next(iter(schema[prop_key]))
             else:
                 updated_key = key
+            new_schema = schema[prop_key].get(updated_key)
             if not ace_editor:
                 with tabs[tab]:
-                    new_schema = schema[prop_key].get(updated_key)
-                    create_form(value, new_schema, workflow_manager, updated_parent_key)
+                    create_form(value, new_schema, updated_parent_key)
             else:
-                new_schema = schema[prop_key].get(updated_key)
                 create_form(
                     value,
                     new_schema,
-                    workflow_manager,
                     updated_parent_key,
                     ace_editor=True,
                 )
@@ -138,17 +101,9 @@ def handle_string_input(
     label: str,
     value: str,
     key: str,
-    workflow_manager: WorkflowManager,
 ):
     """Handle input for string types."""
-    if not value.endswith((".tsv", ".csv", ".xlsx")):
-        return st.text_input(label=label, value=value, key=key)
-    input_value, show_data = data_selector(label, value, key, workflow_manager)
-    # workaround for popver and expander "bug"
-    st.session_state[f"{key}-placeholders"] = [st.empty() for _ in range(3)]
-    if show_data and isinstance(st.session_state[f"{key}-data"], DataFrame):
-        data_editor(key)
-    return input_value
+    return st.text_input(label=label, value=value, key=key)
 
 
 def handle_number_input(label: str, value, key: str):
@@ -206,9 +161,7 @@ def validate_and_report(
     """
     if required:
         valid = validate_input(input_value, input_type)
-        # data inputs are validated in the data_editor and must not be overwritten here
-        if key not in st.session_state["workflow-config-form-valid"]:
-            st.session_state["workflow-config-form-valid"][key] = valid
+        st.session_state["workflow-config-form-valid"][key] = valid
         if not valid:
             report_invalid_input(input_value, key, input_type)
 
@@ -219,7 +172,6 @@ def get_input_element(
     value,
     input_dict: dict,
     key: str,
-    workflow_manager: WorkflowManager,
     *,
     required: bool,
     ace_editor: bool,
@@ -230,7 +182,6 @@ def get_input_element(
     :param value: The current value of the input element.
     :param input_dict: Schema details for the input element.
     :param key: A unique key identifying the input element.
-    :param workflow_manager: An object providing data-related functions.
     :param required: Whether the input is mandatory.
     :param ace_editor: Whether the input element is part of an ACE editor form.
     """
@@ -244,9 +195,9 @@ def get_input_element(
             input_value = handle_array_input(label, value, key)
         elif isinstance(input_type, list) and not isinstance(value, list):
             # input has multiple types and value is not a list => text_input can handle all remaining types
-            input_value = handle_string_input(label, str(value), key, workflow_manager)
+            input_value = handle_string_input(label, str(value), key)
         elif input_type == "string":
-            input_value = handle_string_input(label, str(value), key, workflow_manager)
+            input_value = handle_string_input(label, str(value), key)
         elif input_type in ("integer", "number"):
             input_value, tag = handle_number_input(label, value, key)
         elif input_type == "boolean":
