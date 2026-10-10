@@ -71,8 +71,10 @@ class Workflow(Entity):
                 st.code(self.upstream.schema, language="yaml")
             for identifier, spec in tables_from_data(self.tables).items():
                 with st.expander(f"Example table {identifier}:"):
-                    if spec.example:
-                        st.dataframe(spec.example_table, use_container_width=True)
+                    st.markdown("used fields:")
+                    for field in spec.fields:
+                        st.markdown("- " + ".".join(f"**{i}**" for i in field))
+                    st.dataframe(spec.example_table, use_container_width=True)
                     st.code(
                         yaml.safe_dump(spec.schema, sort_keys=False),
                         language="yaml",
