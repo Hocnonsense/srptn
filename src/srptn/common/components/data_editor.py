@@ -67,11 +67,9 @@ def data_editor(key: str):
     process_user_code(key)
     dataset_ids = list(st.session_state.get("workflow-meta-datasets-sheets", {}))
     with holders[2]:
-        editable_table(
+        edited = editable_table(
             f"{key}-editor",
             st.session_state[f"{key}-data"],
-            on_change=update_data,
-            args=(key,),
             column_config={
                 "datasetid": st.column_config.SelectboxColumn(
                     "datasetid",
@@ -80,6 +78,7 @@ def data_editor(key: str):
                 ),
             },
         )
+    st.session_state[f"{key}-data"] = edited
     validate_data(key)
     # FIXME: use a long table with: (id), datasetid, filename, *meta
     # to select sample from it. Define global indexes, use a list of
@@ -448,22 +447,6 @@ def process_user_code(key: str):
                 key=f"{key}-advanced_manipulation_preview_window",
             )
             validate_data(key, preview_data)
-
-
-def update_data(key: str):
-    """Update the data in the session state based on user edits.
-
-    :param key: The key for the Streamlit session state that identifies the data.
-    """
-    editor = st.session_state[f"{key}-editor"]["edited_rows"]
-    data = st.session_state[f"{key}-data"]
-    if editor:
-        for idx, row_edits in editor.items():
-            for colname, new_value in row_edits.items():
-                data[idx, colname] = new_value
-        st.session_state[f"{key}-data"] = data
-    else:
-        st.warning("No edits detected in the data editor.")
 
 
 def validate_data(key: str, data: pl.DataFrame | None = None):

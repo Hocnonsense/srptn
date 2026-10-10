@@ -12,6 +12,7 @@ from typing import Any, Callable, Mapping
 
 import polars as pl
 import streamlit as st
+from streamlit_sortables import sort_items
 
 Control = Callable[[str, pl.DataFrame], tuple[pl.DataFrame, Any] | None]
 """ A control takes the widget key and the current frame and returns the
@@ -53,10 +54,13 @@ def editable_table(
     frame: pl.DataFrame,
     *,
     column_config: Mapping | None = None,
-    on_change: Callable | None = None,
-    args: tuple | None = None,
+    drop_empty: bool = True,
 ):
-    """Shared ``st.data_editor`` call; returns the edit as a Polars frame."""
+    """Shared ``st.data_editor`` call; returns the edit as a Polars frame.
+
+    With ``drop_empty`` (the default) rows whose cells are all blank are
+    removed, so empty rows added in the editor are not persisted.
+    """
     edited = st.data_editor(
         frame.to_pandas(),
         num_rows="dynamic",
@@ -64,10 +68,21 @@ def editable_table(
         hide_index=True,
         key=key,
         column_config=column_config,
-        on_change=on_change,
-        args=args,
     )
-    return pl.from_pandas(edited)
+    result = pl.from_pandas(edited)
+    return _drop_empty_rows(result) if drop_empty else result
+
+
+def _drop_empty_rows(frame: pl.DataFrame) -> pl.DataFrame:
+    """Drop rows where every cell is null or blank."""
+    if frame.height == 0 or not frame.columns:
+        return frame
+    blank = [
+        pl.col(column).is_null()
+        | (pl.col(column).cast(pl.Utf8).str.strip_chars() == "")
+        for column in frame.columns
+    ]
+    return frame.filter(~pl.all_horizontal(blank))
 
 
 def _add_column(key: str, frame: pl.DataFrame):
@@ -112,8 +127,21 @@ def _delete_column(key: str, frame: pl.DataFrame):
         return frame.drop(selected), selected
 
 
+def _move_column(key: str, frame: pl.DataFrame):
+    options = list(frame.columns)
+    with st.popover("", icon=":material/swap_horiz:", help="Reorder columns"):
+        if len(options) > 1:
+            order = sort_items(options, direction="vertical", key=f"{key}-column-order")
+        else:
+            st.caption("Need at least two columns to reorder.")
+            order = options
+    if list(order) != options:
+        return frame.select(list(order)), order
+
+
 _default_controls = {
     "add": _add_column,
     "rename": _rename_column,
     "remove": _delete_column,
+    "move": _move_column,
 }
