@@ -89,7 +89,7 @@ def editable_table(
     return result
 
 
-def _drop_empty_rows(frame: pl.DataFrame) -> pl.DataFrame:
+def _drop_empty_rows(frame: pl.DataFrame):
     """Drop rows where every cell is null or blank."""
     if frame.height == 0 or not frame.columns:
         return frame

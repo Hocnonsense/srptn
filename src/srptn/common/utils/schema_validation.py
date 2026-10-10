@@ -2,7 +2,9 @@
 
 The project YAML loader keeps scientific-notation floats as strings, so the
 ``number`` type checker is extended to accept them; the app-specific
-``"missing"`` type is dropped before validation.
+``"missing"`` type is dropped before validation.  Table examples are cast to
+their declared types before validation (see
+:func:`..workflow_tables.coerce_frame`), so no other leniency is needed.
 """
 
 from __future__ import annotations

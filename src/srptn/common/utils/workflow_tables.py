@@ -31,6 +31,19 @@ def validate_values(row: Mapping):
     }
 
 
+def nullify(example: Mapping):
+    """Canonicalize a columnar example: empty strings become ``None`` (absent).
+
+    A table cell cannot distinguish ``""`` from missing, so the model keeps a
+    single empty representation (``None``); this keeps the sidecar free of a
+    mix of ``null`` and ``''``.
+    """
+    return {
+        column: [None if value == "" else value for value in values]
+        for column, values in example.items()
+    }
+
+
 def _get_by_path(config, path: list[str], default=None):
     """Resolve a nested field path in a config mapping."""
     # TODO: support file patterns
@@ -205,7 +218,50 @@ def schema_columns(schema) -> list[str]:
     return list(properties) if isinstance(properties, dict) else []
 
 
-def _json_type(dtype):
+_PRIMITIVE_DTYPES = {
+    "string": pl.Utf8,
+    "integer": pl.Int64,
+    "number": pl.Float64,
+    "boolean": pl.Boolean,
+}
+
+
+def column_dtypes(schema: dict):
+    """Declared primitive column dtypes of a row schema (name -> Polars dtype)."""
+    properties = schema.get("properties") if isinstance(schema, dict) else None
+    dtypes: dict[str, type[pl.DataType]] = {}
+    if not isinstance(properties, dict):
+        return dtypes
+    for name, sub in properties.items():
+        if isinstance(sub, dict) and isinstance(sub.get("type"), str):
+            dtype = _PRIMITIVE_DTYPES.get(sub["type"])
+            if dtype is not None:
+                dtypes[name] = dtype
+    return dtypes
+
+
+def coerce_frame(frame: pl.DataFrame, schema: dict):
+    """Cast ``frame`` columns to the schema's declared primitive types.
+
+    Only columns declared as a primitive ``string``/``integer``/``number``/
+    ``boolean`` are cast; a column whose values cannot be cast is left unchanged
+    so validation can report it.  Returns ``(frame, changed)``.
+    """
+    changed = False
+    for name, dtype in column_dtypes(schema).items():
+        if name not in frame.columns or frame.schema[name] == dtype:
+            continue
+        if frame.schema[name] == pl.Utf8 and dtype != pl.Utf8:
+            frame = frame.with_columns(pl.col(name).replace("", None))
+        try:
+            frame = frame.with_columns(pl.col(name).cast(dtype))
+        except Exception:  # noqa: BLE001 - unparseable values stay as-is
+            continue
+        changed = True
+    return frame, changed
+
+
+def _json_type(dtype: pl.DataType):
     if dtype.is_integer():
         return "integer"
     if dtype.is_float():
@@ -235,9 +291,13 @@ class TableSpec(NamedTuple):
 
     @property
     def example_table(self):
-        return pl.DataFrame(
-            pl.DataFrame(self.example or dict.fromkeys(schema_columns(self.schema), []))
+        example = (
+            nullify(self.example)
+            if self.example
+            else {column: [] for column in schema_columns(self.schema)}
         )
+        frame, _ = coerce_frame(pl.DataFrame(example), self.schema)
+        return frame
 
     def paths(self, config):
         """The distinct config values (file paths) for this table's fields."""

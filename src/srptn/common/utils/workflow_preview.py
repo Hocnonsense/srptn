@@ -21,8 +21,9 @@ from .schema_validation import validation_errors
 from .workflow_tables import (
     TABLE_EXTENSIONS,
     TableSpec,
-    validate_values,
+    coerce_frame,
     read_table,
+    validate_values,
     write_table,
 )
 from .yaml_utils import load_yaml, parse_yaml
@@ -125,6 +126,7 @@ def _validate_files(files: dict[str, bytes], schema_dir: Path | None, skip: set[
             continue
         parsed = _parse_file(name, content)
         if isinstance(parsed, pl.DataFrame):
+            parsed, _ = coerce_frame(parsed, schema)
             for index, row in enumerate(parsed.iter_rows(named=True)):
                 for message in validation_errors(validate_values(row), schema):
                     errors.append(f"{name} row {index}: {message}")
