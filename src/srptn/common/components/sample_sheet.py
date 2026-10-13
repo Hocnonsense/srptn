@@ -22,7 +22,7 @@ from typing import Sequence
 import polars as pl
 import streamlit as st
 
-from ..utils.polars_utils import load_data_table
+from ..utils.table_utils import load_data_table
 from .table_editor import column_controls, editable_table
 
 FILE_COLUMN = "file"

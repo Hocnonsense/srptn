@@ -4,7 +4,7 @@ from streamlit.delta_generator import DeltaGenerator
 from streamlit_ace import THEMES, st_ace
 
 from .table_editor import column_controls, editable_table
-from ..utils.polars_utils import load_data_table, merge_dataframes
+from ..utils.table_utils import load_data_table, merge_dataframes
 
 
 def clear_data(key: str, frame: pl.DataFrame):

@@ -19,7 +19,7 @@ import polars as pl
 import yaml
 
 from .config_code import collect_files, config_workdir, run_config_code
-from .polars_utils import TABLE_EXTENSIONS, read_table, save_data_table
+from .table_utils import TABLE_EXTENSIONS, read_table, save_data_table
 from .schema_validation import validation_errors
 from .table_schema import coerce_frame, table_errors
 from .yaml_utils import load_yaml, parse_yaml

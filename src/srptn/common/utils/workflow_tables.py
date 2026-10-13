@@ -14,7 +14,7 @@ from typing import Mapping, NamedTuple
 
 import polars as pl
 
-from .polars_utils import TABLE_EXTENSIONS, read_table
+from .table_utils import TABLE_EXTENSIONS, read_table
 from .table_schema import coerce_frame, nullify, schema_columns, table_errors
 from .yaml_utils import dump_yaml, load_yaml
 

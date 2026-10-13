@@ -11,7 +11,7 @@ from snakedeploy.exceptions import UserError
 
 from ...components.logs import log_selector
 from ...tmux import TmuxSessionManager
-from ...utils.polars_utils import load_data_table, save_data_table
+from ...utils.table_utils import load_data_table, save_data_table
 from ...utils.snakedeploy import Version
 from ...utils.yaml_utils import dump_yaml, load_yaml
 from .. import Address, DataStore, Entity, FileType
