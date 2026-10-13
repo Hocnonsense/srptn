@@ -1,5 +1,6 @@
-import streamlit as st
+from typing import TYPE_CHECKING
 
+import streamlit as st
 
 from ..access.store import AccessStore
 from ..accounts.policy import Actor
@@ -12,8 +13,12 @@ from ..utils.schema_inference import infer_schema, update_schema
 from ..utils.workflow_tables import TableSpec, tables_from_data
 from ..utils.yaml_utils import load_yaml
 from .config_editor import ace_config_editor, create_form
-from .table_schema_editor import table_schema_editor
+from .sample_table import sample_table_editor
 from .ui_components import persistent_text_input
+
+if TYPE_CHECKING:
+    import polars as pl
+    from ..transform.convert import TableConvert
 
 auto_open_script = """
 <script>(() => {
@@ -344,16 +349,17 @@ def _deploy(
     return manager
 
 
-def workflow_editor(workflow: Workflow):
+def workflow_editor(workflow: Workflow, tables: dict[str, pl.DataFrame]):
     """Edit a curated workflow's runner-facing config and declared tables.
 
     The ``Workflow`` contract is authoritative: config/schema come from the
     entity (never the deployed repository), the config never loads workspace
-    files, and the declared tables are edited in memory and written only at
-    store time.
+    files, and the declared tables are built in memory and written only at
+    store time.  Each declared table is generated from the Datasets' long tables
+    (one editor per file) and returned as a ``TableConvert``.
 
-    :returns: ``(config, tables)`` -- the edited config mapping and the
-        ``{identifier: TableSpec}`` mapping.
+    :returns: ``(config, converts)`` -- the edited config mapping and the
+        ``{target: TableConvert}`` mapping.
     """
     config_viewer = st.radio(
         "Configuration editor mode",
@@ -363,7 +369,7 @@ def workflow_editor(workflow: Workflow):
 
     st.divider()
     if st.session_state.get("workflow-config-form") is None:
-        config = load_yaml(workflow.config) or {}
+        config: dict = load_yaml(workflow.config) or {}
         if not isinstance(config, dict):
             st.error("Workflow configuration must be a YAML mapping.")
             return config, None
@@ -387,22 +393,27 @@ def workflow_editor(workflow: Workflow):
     tables_key = f"{key}-tables"
     if tables_key not in st.session_state:
         st.session_state[tables_key] = tables_from_data(workflow.tables)
-    tables = st.session_state[tables_key]
-    return config, _declared_tables(key, config, tables)
+    specs = st.session_state[tables_key]
+    return config, _declared_tables(key, config, specs, tables)
 
 
-def _declared_tables(key: str, config, tables: dict[str, TableSpec]):
-    """Render each declared table path as its own in-memory editor.
+def _declared_tables(
+    key: str,
+    config,
+    specs: dict[str, TableSpec],
+    tables: dict[str, pl.DataFrame],
+):
+    """Render each declared table path as its own :class:`TableConvert` editor.
 
-    Config fields that resolve to the same file share one example; every
-    distinct file path is edited (and later written) separately, so the result
-    is keyed by path.  A path may only carry one row schema: two declarations
-    that disagree are a contract error and are refused rather than silently
-    overwritten (one file cannot hold two schemas).  The row schema stays
-    read-only -- it is part of the curated contract, not runner input.
+    Config fields that resolve to the same file share one declaration; every
+    distinct file path is built separately, so the result is keyed by path.  A
+    path may only carry one row schema: two declarations that disagree are a
+    contract error and are refused rather than silently overwritten.  The row
+    schema stays read-only -- it is part of the curated contract -- and is
+    checked against the generated preview while editing.
     """
     by_path: dict[str, TableSpec] = {}
-    for spec in tables.values():
+    for spec in specs.values():
         for field in spec.fields:
             paths = TableSpec([field], spec.schema, spec.example).paths(config)
             if not paths:
@@ -423,11 +434,13 @@ def _declared_tables(key: str, config, tables: dict[str, TableSpec]):
                 by_path[path] = TableSpec(
                     [*group.fields, field], group.schema, group.example
                 )
-    if not by_path:
-        return {}
-    st.markdown("**Declared tables** — editable example (left) vs row schema (right)")
+    if by_path:
+        st.markdown("Edit tables")
+    converts: dict[str, TableConvert] = {}
     for path, spec in by_path.items():
-        by_path[path] = table_schema_editor(
-            key, path, spec, [path], read_only_schema=True
-        )
-    return by_path
+        fields_label = ", ".join(".".join(map(str, field)) for field in spec.fields)
+        st.caption(f"Edit {path}, referenced fields: {fields_label}")
+        convert = sample_table_editor(f"{key}-{path}", tables, spec.schema)
+        if convert is not None:
+            converts[path] = convert
+    return converts

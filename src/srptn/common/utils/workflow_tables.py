@@ -8,11 +8,14 @@ look like.
 
 from __future__ import annotations
 
+import json
+
 from pathlib import Path
-from typing import Mapping, NamedTuple, IO
+from typing import Iterable, Mapping, NamedTuple, IO
 
 import polars as pl
 
+from .issues import Issue
 from .schema_validation import validation_errors
 from .yaml_utils import dump_yaml, load_yaml
 
@@ -29,6 +32,50 @@ def validate_values(row: Mapping):
     return {
         key: value for key, value in row.items() if value is not None and value != ""
     }
+
+
+def table_errors(table: pl.DataFrame, schema: Mapping | None):
+    """Validate ``table`` cells against the row ``schema``, column by column.
+
+    Returns one :class:`Issue` per offending cell (with its row and column),
+    plus a missing-column issue for each required column absent from the table.
+    Array cells encoded as JSON strings are decoded before validation.
+    """
+    errors: list[Issue] = []
+    if not schema or table is None:
+        return errors
+    properties = schema.get("properties") if isinstance(schema, dict) else None
+    if not isinstance(properties, dict):
+        return errors
+    arrays = set(array_fields(table.columns, schema))
+    required = set(schema.get("required") or [])
+    for column in table.columns:
+        sub = properties.get(column)
+        if not isinstance(sub, dict):
+            continue
+        for index, value in enumerate(table[column].to_list()):
+            if value is None or value == "":
+                if column in required:
+                    errors.append(
+                        Issue("required value missing", row=index, column=column)
+                    )
+                continue
+            if column in arrays and isinstance(value, str):
+                try:
+                    value = json.loads(value)
+                except json.JSONDecodeError:
+                    pass
+            for message in validation_errors(value, sub):
+                errors.append(Issue(message, row=index, column=column))
+    for column in required:
+        if column in table.columns:
+            continue
+        message = f"'{column}' is a required property"
+        if table.height == 0:
+            errors.append(Issue(message, column=column))
+        for index in range(table.height):
+            errors.append(Issue(message, row=index, column=column))
+    return errors
 
 
 def nullify(example: Mapping):
@@ -93,23 +140,6 @@ def read_table(
     except Exception:
         return None
     return None
-
-
-def write_table(table: pl.DataFrame, path: Path):
-    """Write a table by extension; unsupported extensions raise (no fallback)."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    suffix = path.suffix.lower()
-    if suffix == ".tsv":
-        table.write_csv(path, separator="\t")
-    elif suffix == ".csv":
-        table.write_csv(path)
-    elif suffix == ".xlsx":
-        table.write_excel(path)
-    else:
-        raise ValueError(
-            f"Unsupported file format: {suffix}. Supported formats are: "
-            + ", ".join(TABLE_EXTENSIONS)
-        )
 
 
 def _suffix_table_fields(config):
@@ -225,6 +255,20 @@ _PRIMITIVE_DTYPES = {
     "boolean": pl.Boolean,
 }
 
+_ARRAY_DTYPE = pl.List(pl.String)
+
+
+def array_fields(fields: Iterable[str], schema: Mapping):
+    """Declared ``array`` column names of a row schema."""
+    properties = schema.get("properties") if isinstance(schema, dict) else {}
+    if not properties:
+        return
+    for name in fields:
+        sub = properties.get(name)
+        if not isinstance(sub, dict) or sub.get("type") != "array":
+            continue
+        yield name
+
 
 def column_dtypes(schema: dict):
     """Declared primitive column dtypes of a row schema (name -> Polars dtype)."""
@@ -241,13 +285,24 @@ def column_dtypes(schema: dict):
 
 
 def coerce_frame(frame: pl.DataFrame, schema: dict):
-    """Cast ``frame`` columns to the schema's declared primitive types.
+    """Cast ``frame`` columns to the schema's declared column types.
 
-    Only columns declared as a primitive ``string``/``integer``/``number``/
-    ``boolean`` are cast; a column whose values cannot be cast is left unchanged
-    so validation can report it.  Returns ``(frame, changed)``.
+    Primitive columns are cast as before; ``array`` columns encoded as a JSON
+    string are decoded to a list.  A column whose values cannot be converted is
+    left unchanged so validation can report it.  Returns ``(frame, changed)``.
     """
     changed = False
+    for name in array_fields(frame.columns, schema):
+        if frame.schema[name] == _ARRAY_DTYPE:
+            continue
+        if frame.schema[name] == pl.Utf8:
+            try:
+                frame = frame.with_columns(
+                    pl.col(name).str.json_decode(_ARRAY_DTYPE).alias(name)
+                )
+            except Exception:  # noqa: BLE001 - unparseable values stay as-is
+                continue
+            changed = True
     for name, dtype in column_dtypes(schema).items():
         if name not in frame.columns or frame.schema[name] == dtype:
             continue
@@ -276,10 +331,15 @@ def infer_table_schema(table: pl.DataFrame):
     return {
         "type": "object",
         "properties": {
-            column: {"type": _json_type(table.schema[column])}
-            for column in table.columns
+            column: _column_schema(table.schema[column]) for column in table.columns
         },
     }
+
+
+def _column_schema(dtype: pl.DataType):
+    if dtype.is_nested():
+        return {"type": "array", "items": {"type": "string"}}
+    return {"type": _json_type(dtype)}
 
 
 class TableSpec(NamedTuple):
@@ -310,14 +370,21 @@ class TableSpec(NamedTuple):
 
     def errors(self):
         """Validate the columnar example against the row schema."""
-        errors: list[str] = []
         if self.schema:
             try:
                 table = self.example_table
             except Exception as error:  # noqa: BLE001 - report bad example data
-                errors.append(repr(error))
+                yield repr(error)
             else:
-                for index, row in enumerate(table.iter_rows(named=True)):
-                    for message in validation_errors(validate_values(row), self.schema):
-                        errors.append(f"row {index}: {message}")
-        return errors
+                for issue in table_errors(table, self.schema):
+                    yield issue
+
+
+def table_path_frames(tables: Mapping[str, TableSpec], config):
+    """Expand each declared table's example to every config path it binds to."""
+    provided: dict[str, pl.DataFrame] = {}
+    for spec in tables.values():
+        table = spec.example_table
+        for path in spec.paths(config):
+            provided[path] = table
+    return provided

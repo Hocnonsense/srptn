@@ -1,9 +1,11 @@
-"""Previewing the config transformation over a throw-away copy of the examples.
+"""Running the curator code over a throw-away copy of the tables.
 
-``PreviewResult.run`` is the single path used to generate and validate a
-curation: it validates the example tables (before the code), runs the code in a
-temp directory, then validates the produced config against the upstream schema
-and every produced file against the original repo schema.
+``run_tables`` is the single path used to produce and validate a conversion:
+it writes the tables into a temp directory, runs the curator code, then
+validates the produced config against the upstream schema and every produced
+file against the original repo schema.  It returns ``(files, config)`` and
+appends problems to a caller-provided ``errors`` list.  Callers provide ready
+tables (``path -> DataFrame``).
 """
 
 from __future__ import annotations
@@ -11,82 +13,66 @@ from __future__ import annotations
 import io
 
 from pathlib import Path
-from typing import Mapping, NamedTuple
+from typing import Mapping
 
 import polars as pl
 import yaml
 
 from .config_code import collect_files, config_workdir, run_config_code
+from .polars_utils import save_data_table
 from .schema_validation import validation_errors
 from .workflow_tables import (
     TABLE_EXTENSIONS,
-    TableSpec,
     coerce_frame,
     read_table,
-    validate_values,
-    write_table,
+    table_errors,
 )
 from .yaml_utils import load_yaml, parse_yaml
 
 
-class PreviewResult(NamedTuple):
-    """The outcome of running the conversion code in a throw-away directory."""
+def run_tables(
+    code: str,
+    config,
+    tables: Mapping[str, pl.DataFrame],
+    internal_schema: Mapping | None,
+    schema_dir: Path | None,
+    errors: list[str],
+    *,
+    config_target: str = "config/config.yaml",
+) -> tuple[dict[str, bytes], dict | None]:
+    """Run the conversion code over ready tables (``path -> DataFrame``).
 
-    errors: list[str]
-    files: dict[str, bytes]
-    config: dict | None
-
-    @property
-    def ok(self):
-        return not self.errors
-
-    @classmethod
-    def run(
-        cls,
-        code: str,
-        config,
-        tables: dict[str, TableSpec],
-        internal_schema: Mapping | None,
-        schema_dir: Path | None,
-        *,
-        config_target: str = "config/config.yaml",
-    ):
-        """Run the conversion code over a temp copy of the example tables.
-
-        1. validate the example tables against their own (row) schema, before code,
-        2. write the declared example tables and run the code in that directory,
-        3. save the returned config,
-        4. validate the config against the upstream schema,
-        5. validate every produced file against the original repo schema.
-        """
-        errors: list[str] = []
-        for identifier, spec in tables.items():
-            errors.extend(
-                f"table '{identifier}': {message}" for message in spec.errors()
-            )
-        if errors:
-            return cls(errors, {}, None)
-
-        with config_workdir() as cwd:
-            for identifier, spec in tables.items():
-                table = spec.example_table
-                for path in spec.paths(config):
-                    try:
-                        write_table(table, cwd / path)
-                    except Exception as error:  # noqa: BLE001
-                        return cls([f"table '{path}': {error!r}"], {}, None)
+    Returns ``(files, config)``; problems are appended to ``errors`` and, on
+    failure, the produced artifacts are ``({}, None)``.
+    """
+    with config_workdir() as cwd:
+        for path, table in tables.items():
+            target = cwd / path
             try:
-                produced = run_config_code(code, config, cwd)
-            except Exception as error:  # noqa: BLE001 - report any curator failure
-                return cls([f"config code failed: {error!r}"], {}, None)
-            config_file = cwd / config_target
-            config_file.parent.mkdir(parents=True, exist_ok=True)
-            config_file.write_text(yaml.safe_dump(produced, sort_keys=False))
-            files = collect_files(cwd)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                save_data_table(table, target)
+            except pl.exceptions.ComputeError as error:
+                # Array columns cannot be written to a flat format; the curator
+                # code reads those values through ``read_table`` instead.
+                if "nested" not in str(error):
+                    errors.append(f"table '{path}': {error!r}")
+                    return {}, None
+            except Exception as error:  # noqa: BLE001
+                errors.append(f"table '{path}': {error!r}")
+                return {}, None
+        try:
+            produced = run_config_code(code, config, cwd, read_table=tables.get)
+        except Exception as error:  # noqa: BLE001 - report any curator failure
+            errors.append(f"config code failed: {error!r}")
+            return {}, None
+        config_file = cwd / config_target
+        config_file.parent.mkdir(parents=True, exist_ok=True)
+        config_file.write_text(yaml.safe_dump(produced, sort_keys=False))
+        files = collect_files(cwd)
 
-        errors = validation_errors(produced, internal_schema)
-        errors += _validate_files(files, schema_dir, skip={config_target})
-        return cls(errors=errors, files=files, config=produced)
+    errors.extend(validation_errors(produced, internal_schema))
+    errors.extend(_validate_files(files, schema_dir, skip={config_target}))
+    return files, produced
 
 
 def _parse_file(name: str, content: bytes):
@@ -127,9 +113,7 @@ def _validate_files(files: dict[str, bytes], schema_dir: Path | None, skip: set[
         parsed = _parse_file(name, content)
         if isinstance(parsed, pl.DataFrame):
             parsed, _ = coerce_frame(parsed, schema)
-            for index, row in enumerate(parsed.iter_rows(named=True)):
-                for message in validation_errors(validate_values(row), schema):
-                    errors.append(f"{name} row {index}: {message}")
+            errors.extend(f"{name} {issue}" for issue in table_errors(parsed, schema))
         elif isinstance(parsed, (dict, list)):
             for message in validation_errors(parsed, schema):
                 errors.append(f"{name}: {message}")

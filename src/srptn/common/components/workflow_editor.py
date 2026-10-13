@@ -25,11 +25,12 @@ from ..data.entities.workflow import UpstreamRef, Workflow
 from ..utils.schema_inference import infer_schema
 from ..utils.schema_validation import schema_errors, validation_errors
 from ..utils.snakedeploy import Version
-from ..utils.workflow_preview import PreviewResult
+from ..utils.workflow_preview import run_tables
 from ..utils.workflow_tables import (
     TableSpec,
     add_table_fields,
     build_tables,
+    table_path_frames,
     tables_from_data,
     tables_to_data,
 )
@@ -156,6 +157,11 @@ def workflow_editor(
         )
 
     st.markdown("**Config conversion code** — `config` in, converted `config` out")
+    st.markdown(
+        "note: Recommend to read user's tables using `read_table(file_path)`. "
+        "If the table contains columns with schema type 'array', "
+        "it cannot be read with `pl.read_csv` or written with `pl.write_csv`."
+    )
     code = st_ace(
         _DEFAULT_CODE,
         language="python",
@@ -172,13 +178,27 @@ def workflow_editor(
         key=f"{key}-preview-{run}",
         disabled=not isinstance(config, dict) or runner_error is not None,
     ):
-        result = PreviewResult.run(
-            code, config, st.session_state[tables_dict_key], internal_schema, schema_dir
-        )
-        st.session_state[f"{key}-result-{run}"] = result
-        if result.ok:
-            # Only a clean preview caches the Workflow and enables Save.
-            st.session_state[cached_key] = Workflow(
+        specs: dict[str, TableSpec] = st.session_state[tables_dict_key]
+        errors = [
+            f"table '{identifier}': {issue}"
+            for identifier, spec in specs.items()
+            for issue in spec.errors()
+        ]
+        if errors:
+            files, produced, cache_workflow = {}, None, None
+        else:
+            files, produced = run_tables(
+                code,
+                config,
+                table_path_frames(specs, config),
+                internal_schema,
+                schema_dir,
+                errors,
+            )
+            # Only a clean preview caches the Workflow and enables Save.  Store the
+            # preview result before the cache, so a failure never leaves Save on
+            # without a preview.
+            cache_workflow = Workflow(
                 address=init_state.address,
                 desc=desc,
                 upstream=init_state.upstream,
@@ -187,8 +207,8 @@ def workflow_editor(
                 code=code,
                 tables=tables_to_data(st.session_state[tables_dict_key]),
             )
-        else:
-            st.session_state.pop(cached_key, None)
+        st.session_state[f"{key}-result-{run}"] = (files, produced, errors)
+        st.session_state[cached_key] = cache_workflow
 
     _render_preview(st.session_state.get(f"{key}-result-{run}"))
 
@@ -317,19 +337,20 @@ def _save_table_form(
     st.rerun()
 
 
-def _render_preview(result: PreviewResult | None):
+def _render_preview(result: tuple[dict[str, bytes], dict, list[str]] | None):
     st.markdown("**Generated config (read-only, checked against the upstream schema)**")
     if result is None:
         st.caption("Use 'Preview conversion' to generate the upstream config.")
         return
-    if result.errors:
-        for message in result.errors:
+    files, produced, errors = result
+    if errors:
+        for message in errors:
             st.error(message)
         return
-    st.code(yaml.safe_dump(result.config, sort_keys=False), language="yaml")
+    st.code(yaml.safe_dump(produced, sort_keys=False), language="yaml")
     st.success("Preview valid: config and files match the upstream schemas.")
-    if result.files:
+    if files:
         st.markdown("**Generated files**")
-        for name, content in result.files.items():
+        for name, content in files.items():
             with st.expander(name):
                 st.code(content.decode("utf-8", "replace"), language="text")
