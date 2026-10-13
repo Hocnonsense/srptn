@@ -6,11 +6,17 @@ never hashes or verifies passwords: it stores and returns the hash.
 """
 
 import sqlite3
+from datetime import datetime, timezone
 
-from ..utils.clock import utcnow
 from ..utils.db import Database
+
 from .models import Account, AccountStatus, EventLevel, Session
 from .policy import Role
+
+
+def utcnow():
+    """Return the current UTC time as an ISO-8601 string."""
+    return datetime.now(timezone.utc).isoformat()
 
 
 class AccountRepository:
