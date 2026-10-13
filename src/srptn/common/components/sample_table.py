@@ -1,11 +1,10 @@
 """Streamlit editor that builds a :class:`TableConvert` from long-table inputs.
 
 ``_table_convert_editor`` is the Dataset-metadata editor: it records operations
-step by step and builds the table as far as the user has defined it, returning
-``(table, operations, inputs)`` early when the next step is undefined.  It only
-produces the table derived from the Datasets' metadata; ``sample_table_editor``
-wraps it and merges the overlay side table, so the overlay can stand alone even
-when the convert returns nothing.  Neither touches the filesystem.
+step by step and returns ``(table, rules)`` early when the next step is
+undefined.  ``sample_table_editor`` wraps it, renders the overlay side table and
+previews the result from the returned table (corrected against the schema and
+joined with the overlay).  Neither touches the filesystem.
 """
 
 from __future__ import annotations
@@ -17,13 +16,10 @@ import streamlit as st
 
 
 from ..components.sample_sheet import FILE_COLUMN
-from ..transform.convert import TableConvert, unpack_by_schema
-from ..transform.core import merge_overlay
+from ..transform.convert import TableConvert, merge_overlay, unpack_by_schema
 from ..transform.models import Condition, TransformRules
-from ..utils.workflow_tables import table_errors
+from ..utils.table_schema import table_errors
 from .table_editor import column_controls, editable_table
-
-MAX_REPORTED = 20
 
 
 def sample_table_editor(

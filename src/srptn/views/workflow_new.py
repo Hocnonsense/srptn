@@ -7,7 +7,7 @@ from srptn.common.components.workflow_editor import (
     DeployInitialState,
     workflow_editor,
 )
-from srptn.common.components.workflows import select_workflow
+from srptn.common.components.workflow_source import select_workflow
 from srptn.common.data import Address
 from srptn.common.data.entities.analysis import WorkflowManager
 from srptn.common.data.entities.workflow import Workflow

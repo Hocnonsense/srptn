@@ -13,14 +13,14 @@ from __future__ import annotations
 
 import os
 
-from typing import Sequence, TYPE_CHECKING
+from typing import Callable, Sequence, TYPE_CHECKING
 
 import polars as pl
 import streamlit as st
 
 
 from ..data import FileType
-from .sample_sheet import sample_sheet_editor
+from .sample_sheet import FILE_COLUMN, sample_sheet_editor
 
 if TYPE_CHECKING:
     from ..data.entities.dataset import Dataset
@@ -58,7 +58,7 @@ def dataset_long_table(key: str, datasets: "Sequence[Dataset]"):
 
 
 def make_key(address: str, file_column: pl.Expr):
-    """Preview key: ``address//name`` (``//`` delimits the address)."""
+    """Preview key: ``address/name`` (unique per source Dataset row)."""
     return pl.lit(address + "/") + file_column
 
 
@@ -78,3 +78,21 @@ def make_realpath(workspace: "Workspace"):
         )
 
     return inner
+
+
+def keyed_tables(
+    tables: dict[str, pl.DataFrame],
+    make_key: Callable[[str, pl.Expr], pl.Expr],
+    file_column: str = FILE_COLUMN,
+):
+    """Stamp each table's ``file`` column with its source address.
+
+    ``make_key(address, file)`` decides the key: :func:`make_key` for the
+    in-memory preview, :func:`make_realpath` for the final on-disk paths.
+    """
+    return {
+        address: sheet.with_columns(
+            make_key(address, pl.col(file_column)).alias(file_column)
+        )
+        for address, sheet in tables.items()
+    }

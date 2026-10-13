@@ -40,15 +40,11 @@ class TableConvert:
         self,
         tables: Mapping[str, pl.DataFrame],
         errors: list[Issue] | None = None,
-        *,
-        validate: bool = True,
     ):
         """Merge ``tables``, build the table and join the overlay.
 
         Problems are appended to ``errors``; when it is ``None`` the first
-        problem raises ``ValueError``.  ``validate`` additionally appends the
-        per-cell schema errors (callers that validate separately pass ``False``).
-        Returns the resulting ``pl.DataFrame``.
+        problem raises ``ValueError``.  Returns the resulting ``pl.DataFrame``.
         """
         if self.rules is None:
             if self.overlay is None:
@@ -63,12 +59,11 @@ class TableConvert:
         table = unpack_by_schema(table, self.schema, errors)
         if self.overlay is not None:
             table = merge_overlay(table, self.overlay, self.rules.renamed_index, errors)
-        if validate:
-            schema_errors = list(table_errors(table, self.schema))
-            if schema_errors:
-                if errors is None:
-                    raise ValueError(str(schema_errors[0]))
-                errors.extend(schema_errors)
+        schema_errors = list(table_errors(table, self.schema))
+        if schema_errors:
+            if errors is None:
+                raise ValueError(str(schema_errors[0]))
+            errors.extend(schema_errors)
         return table
 
 

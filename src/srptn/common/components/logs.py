@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 import streamlit as st
 
 if TYPE_CHECKING:
-    from srptn.common.data.entities.analysis import WorkflowManager
+    from ..data.entities.analysis import WorkflowManager
 
 
 def log_selector(workflow_manager: "WorkflowManager"):

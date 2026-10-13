@@ -13,7 +13,7 @@ then caches the ``Workflow`` and enables "Save workflow".
 from __future__ import annotations
 
 from pathlib import Path
-from typing import NamedTuple
+from typing import NamedTuple, Sequence
 
 import streamlit as st
 import yaml
@@ -25,6 +25,12 @@ from ..data.entities.workflow import UpstreamRef, Workflow
 from ..utils.schema_inference import infer_schema
 from ..utils.schema_validation import schema_errors, validation_errors
 from ..utils.snakedeploy import Version
+from ..utils.table_schema import (
+    coerce_frame,
+    column_dtypes,
+    infer_table_schema,
+    nullify,
+)
 from ..utils.workflow_preview import run_tables
 from ..utils.workflow_tables import (
     TableSpec,
@@ -35,8 +41,9 @@ from ..utils.workflow_tables import (
     tables_to_data,
 )
 from ..utils.yaml_utils import dump_yaml, load_yaml, parse_yaml
-from .table_schema_editor import table_schema_editor
+from .table_editor import column_controls, editable_table
 
+_TABLE_ACE_HEIGHT = 220
 _ACE_HEIGHT = 340
 _DEFAULT_CODE = (
     "# `config` holds the runner-facing config as a dict.\n"
@@ -215,6 +222,25 @@ def workflow_editor(
     return st.session_state.get(cached_key)
 
 
+def _render_preview(result: tuple[dict[str, bytes], dict, list[str]] | None):
+    st.markdown("**Generated config (read-only, checked against the upstream schema)**")
+    if result is None:
+        st.caption("Use 'Preview conversion' to generate the upstream config.")
+        return
+    files, produced, errors = result
+    if errors:
+        for message in errors:
+            st.error(message)
+        return
+    st.code(yaml.safe_dump(produced, sort_keys=False), language="yaml")
+    st.success("Preview valid: config and files match the upstream schemas.")
+    if files:
+        st.markdown("**Generated files**")
+        for name, content in files.items():
+            with st.expander(name):
+                st.code(content.decode("utf-8", "replace"), language="text")
+
+
 def _tables_section(
     key: str, config, tables: dict[str, TableSpec], data_path: Path, editor_key: str
 ):
@@ -250,6 +276,80 @@ def _tables_section(
     if st.button("", icon=":material/add:", help="Define a table", key=f"{key}-add"):
         _open_table_form(key, "add")
     _table_form(key, config, tables, data_path)
+
+
+def table_schema_editor(
+    key: str,
+    identifier: str,
+    spec: TableSpec,
+    paths: Sequence[str],
+    *,
+    read_only_schema: bool = False,
+):
+    """Render one table's example/schema editors and return the current spec.
+
+    The schema (right) is authoritative and read first; the example frame (left)
+    is cast to its declared column types before rendering, so the schema always
+    steers the table.  With ``read_only_schema`` the schema is shown for
+    reference only -- the runner must not change a curated workflow's contract.
+    """
+    row_schema = spec.schema
+    prefix = f"{key}-{identifier}"
+    data_key = f"{prefix}-data"
+    if data_key not in st.session_state:
+        st.session_state[data_key] = spec.example_table
+
+    if not paths:
+        return spec
+    fields_label = ", ".join(".".join(map(str, field)) for field in spec.fields)
+    st.caption(f"{identifier}: {fields_label} -> {list(paths)}")
+    col1, col2 = st.columns(2)
+    with col2:
+        base_schema = (
+            row_schema
+            if isinstance(row_schema, dict)
+            else infer_table_schema(st.session_state[data_key])
+        )
+        if read_only_schema:
+            st.code(yaml.safe_dump(base_schema, sort_keys=False), language="yaml")
+            new_schema = base_schema
+        else:
+            new_schema_text = st_ace(
+                yaml.safe_dump(base_schema, sort_keys=False),
+                language="yaml",
+                height=_TABLE_ACE_HEIGHT,
+                auto_update=False,
+                key=f"{prefix}-schema",
+            )
+            parsed, parse_error = parse_yaml(new_schema_text)
+            new_schema = (
+                parsed if not parse_error and isinstance(parsed, dict) else row_schema
+            )
+
+    # The schema steers the table: cast the frame to its declared column types,
+    # rebuilding the editor only when those types change.
+    declared = column_dtypes(new_schema)
+    types_key = f"{prefix}-types"
+    retyped = st.session_state.get(types_key) != declared
+    if retyped:
+        st.session_state[types_key] = declared
+        st.session_state[data_key], _ = coerce_frame(
+            st.session_state[data_key], new_schema
+        )
+
+    with col1:
+        change = column_controls(prefix)
+        frame = editable_table(prefix, reset=bool(change) or retyped)
+        frame, _ = coerce_frame(frame, new_schema)
+        st.session_state[data_key] = frame
+        example = nullify(frame.to_dict(as_series=False))
+
+        spec = TableSpec(spec.fields, new_schema, example)
+        for message in schema_errors(new_schema):
+            st.error(f"table '{identifier}' schema: {message}")
+        for message in spec.errors():
+            st.error(f"table '{identifier}': {message}")
+    return spec
 
 
 def _open_table_form(key: str, mode: str, name: str | None = None, path=None):
@@ -335,22 +435,3 @@ def _save_table_form(
     add_table_fields(config, path, tables, data_path)
     st.session_state.pop(f"{key}-form", None)
     st.rerun()
-
-
-def _render_preview(result: tuple[dict[str, bytes], dict, list[str]] | None):
-    st.markdown("**Generated config (read-only, checked against the upstream schema)**")
-    if result is None:
-        st.caption("Use 'Preview conversion' to generate the upstream config.")
-        return
-    files, produced, errors = result
-    if errors:
-        for message in errors:
-            st.error(message)
-        return
-    st.code(yaml.safe_dump(produced, sort_keys=False), language="yaml")
-    st.success("Preview valid: config and files match the upstream schemas.")
-    if files:
-        st.markdown("**Generated files**")
-        for name, content in files.items():
-            with st.expander(name):
-                st.code(content.decode("utf-8", "replace"), language="text")

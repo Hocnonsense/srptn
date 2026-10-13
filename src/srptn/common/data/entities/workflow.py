@@ -12,7 +12,7 @@ Snakefile is left untouched; the platform runs the code to produce the config.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 import streamlit as st
 import yaml
@@ -20,6 +20,13 @@ import yaml
 from .. import DataStore, Entity
 from ...utils.snakedeploy import Version
 from ...utils.workflow_tables import tables_from_data
+from ...utils.workflow_preview import run_tables
+from ...utils.yaml_utils import load_yaml
+
+if TYPE_CHECKING:
+    import polars as pl
+    from ...utils.snakedeploy import Address
+    from ...transform.convert import TableConvert
 
 UPSTREAM_FILE = "upstream.yml"
 CONFIG_FILE = "config.yaml"
@@ -105,3 +112,31 @@ class Workflow(Entity):
         workspace.write_meta(CONFIG_SCHEMA_FILE, self.config_schema)
         workspace.write_meta(CODE_FILE, self.code)
         workspace.write_meta(TABLES_FILE, self.tables)
+
+    def generate_files(
+        self: Workflow,
+        config: dict,
+        converts: dict[str, TableConvert],
+        tables: dict[str, pl.DataFrame],
+        address: Address,
+        data_store: DataStore,
+    ) -> tuple[dict[str, bytes], list[str]]:
+        """Build each convert's table and run the workflow code.
+
+        Returns ``(files, errors)``.
+        """
+        internal_schema = (
+            load_yaml(self.upstream.schema) if self.upstream.schema else None
+        )
+        schema_dir = data_store.workspace(address).data_path / "workflow" / "schemas"
+        provided = {}
+        issues = []
+        for target, convert in converts.items():
+            provided[target] = convert.build(tables, issues)
+        errors = [str(issue) for issue in issues]
+        if errors:
+            return {}, errors
+        files, _ = run_tables(
+            self.code, config, provided, internal_schema, schema_dir, errors
+        )
+        return files, errors
