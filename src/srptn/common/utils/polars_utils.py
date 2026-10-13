@@ -1,8 +1,51 @@
 from pathlib import Path
+from typing import Mapping, IO
 
 import polars as pl
 import streamlit as st
 from streamlit.runtime.uploaded_file_manager import UploadedFile
+
+TABLE_EXTENSIONS = (".tsv", ".csv", ".xlsx")
+
+
+def read_table(
+    source: str | Path | IO[bytes] | bytes,
+    schema: Mapping[str, pl.DataType | type[pl.DataType]] | None = None,
+    *,
+    suffix: str | None = None,
+    infer: bool = False,
+) -> pl.DataFrame | None:
+    """Read a table by extension, or ``None`` when unreadable/unsupported.
+
+    ``source`` is a path or a binary buffer/-stream; pass ``suffix`` when it is
+    not a path.  ``schema`` gives strict per-column dtype overrides; ``infer``
+    selects how the remaining columns are read.  Combining them yields four
+    modes:
+
+    ============ ===================================================
+    (None, False) every column as string (``infer_schema_length=0``),
+                  the ``dtype=str`` convention of Snakemake sample
+                  sheets: identifiers such as ``unit`` stay strings
+    (None, True)  Polars' default type inference
+    (schema, *)   ``schema`` columns keep their dtype; the rest follow
+                  ``infer`` (strings or inferred)
+    ============ ===================================================
+    """
+    kwargs: dict = dict(
+        schema_overrides=dict(schema) if schema else None,
+        infer_schema_length=None if infer else 0,
+    )
+    suffix = (suffix or getattr(source, "suffix", "")).lower()
+    try:
+        if suffix == ".tsv":
+            return pl.read_csv(source, separator="\t", **kwargs)
+        if suffix == ".csv":
+            return pl.read_csv(source, **kwargs)
+        if suffix == ".xlsx":
+            return pl.read_excel(source, **kwargs)
+    except Exception:
+        return None
+    return None
 
 
 def enforce_typing(data: pl.DataFrame, schema: dict) -> pl.DataFrame:
