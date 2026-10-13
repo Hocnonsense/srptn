@@ -27,7 +27,7 @@ from ..utils.schema_validation import schema_errors, validation_errors
 from ..utils.snakedeploy import Version
 from ..utils.table_schema import (
     coerce_frame,
-    column_dtypes,
+    field_dtypes,
     infer_table_schema,
     nullify,
 )
@@ -146,10 +146,11 @@ def workflow_editor(
         with col2:
             st.error(f"Schema error: {message}")
     if isinstance(config, dict) and not schema_messages:
-        messages = validation_errors(config, runner_schema)
-        for message in messages:
-            st.error(message)
-        if not messages:
+        success = True
+        for message in validation_errors(config, runner_schema):
+            st.error(str(message))
+            success = False
+        if success:
             st.success("Config matches the schema.")
 
     workspace = data_store.workspace(init_state.address)
@@ -328,7 +329,7 @@ def table_schema_editor(
 
     # The schema steers the table: cast the frame to its declared column types,
     # rebuilding the editor only when those types change.
-    declared = column_dtypes(new_schema)
+    declared = dict(field_dtypes(st.session_state[data_key].columns, new_schema))
     types_key = f"{prefix}-types"
     retyped = st.session_state.get(types_key) != declared
     if retyped:

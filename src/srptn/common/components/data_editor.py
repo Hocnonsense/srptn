@@ -48,6 +48,7 @@ def data_editor(key: str):
 
     :param key: The key for the Streamlit session state.
     """
+    # TODO: enable edit as text (csv/tsv)
     holders: list[DeltaGenerator] = st.session_state[f"{key}-placeholders"]
     with holders[0]:
         change = column_controls(

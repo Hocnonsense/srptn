@@ -16,9 +16,9 @@ import streamlit as st
 
 
 from ..components.sample_sheet import FILE_COLUMN
-from ..transform.convert import TableConvert, merge_overlay, unpack_by_schema
+from ..transform.convert import TableConvert, merge_overlay
 from ..transform.models import Condition, TransformRules
-from ..utils.table_schema import table_errors
+from ..utils.table_schema import coerce_frame, table_errors
 from .table_editor import column_controls, editable_table
 
 
@@ -37,7 +37,6 @@ def sample_table_editor(
     errors = []
     if ret:
         table, rules = ret
-        table = unpack_by_schema(table, schema, errors)
         final = merge_overlay(table, overlay, rules.renamed_index, errors)
     elif overlay is not None:
         rules = None
@@ -49,6 +48,7 @@ def sample_table_editor(
     if final is None:
         st.info("Select input tables (or fill the overlay) to see a preview.")
         return None
+    final, _ = coerce_frame(final, schema, errors)
     _display(final, key)
     # only validate the schema once the table built cleanly
     for issue in errors or table_errors(final, schema):

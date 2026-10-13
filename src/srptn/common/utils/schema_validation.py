@@ -4,13 +4,13 @@ The project YAML loader keeps scientific-notation floats as strings, so the
 ``number`` type checker is extended to accept them; the app-specific
 ``"missing"`` type is dropped before validation.  Table examples are cast to
 their declared types before validation (see
-:func:`..workflow_tables.coerce_frame`), so no other leniency is needed.
+:func:`..table_schema.coerce_frame`), so no other leniency is needed.
 """
 
 from __future__ import annotations
 
 from functools import cache
-from typing import Mapping, overload
+from typing import Mapping, NamedTuple, overload
 
 import jsonschema.validators
 from jsonschema.exceptions import SchemaError
@@ -49,23 +49,29 @@ def _extended_validator(base: type[Validator]) -> type[Validator]:
     )
 
 
+class Violation(NamedTuple):
+    """A single schema violation: the instance path and the raw message."""
+
+    path: tuple
+    message: str
+
+    def __str__(self):
+        where = "/".join(str(part) for part in self.path) or "<root>"
+        return f"{where}: {self.message}"
+
+
 def validation_errors(instance, schema: Mapping | None):
-    """Return all jsonschema violations as ``"path: message"`` strings."""
-    if schema:
-        schema = sanitize_schema(schema)
-        base = jsonschema.validators.validator_for(schema)
-        validator = _extended_validator(base)(schema)
-        errors = sorted(
-            validator.iter_errors(instance),
-            key=lambda error: list(error.absolute_path),
-        )
-    else:
-        errors = []
-    return [
-        f"{'/'.join(str(part) for part in error.absolute_path) or '<root>'}: "
-        f"{error.message}"
-        for error in errors
-    ]
+    """Return the jsonschema violations of ``instance`` as :class:`Violation`\\ s.
+
+    Callers decide how to present them (``str(violation)`` renders ``path: msg``).
+    """
+    if not schema:
+        return
+    schema = sanitize_schema(schema)
+    base = jsonschema.validators.validator_for(schema)
+    validator = _extended_validator(base)(schema)
+    for error in validator.iter_errors(instance):
+        yield Violation(tuple(error.absolute_path), error.message)
 
 
 def schema_errors(schema: Mapping | None):
