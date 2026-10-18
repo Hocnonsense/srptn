@@ -9,6 +9,7 @@ import streamlit as st
 import yaml
 from snakedeploy.exceptions import UserError
 
+from ...dag_tracker import DAGTracker
 from ...components.logs import log_selector
 from ...tmux import TmuxSessionManager
 from ...utils.table_utils import load_data_table, save_data_table
@@ -30,6 +31,13 @@ class WorkflowManager:
 
     workspace: Workspace
     version: Version
+    _dag_tracer: DAGTracker | None = None
+
+    @property
+    def dag_tracer(self):
+        if self._dag_tracer is None:
+            self._dag_tracer = DAGTracker(self.workspace)
+        return self._dag_tracer
 
     @classmethod
     def deploy(
@@ -196,7 +204,7 @@ class AnalysisRuntimeManager:
         self.tmux_manager = TmuxSessionManager()
         self.output: str | None = None
 
-    def _authorized(self, access: "AccessStore", actor: "Actor"):
+    def _authorized(self, access: "AccessStore", actor: "Actor") -> bool:
         """Re-check run/stop permission against the current account state."""
         if not access.can_run(actor, self.address):
             st.error("You do not have permission to run or stop this analysis.")
@@ -228,10 +236,8 @@ class AnalysisRuntimeManager:
         output = self.tmux_manager.capture_output(self.session_name)
         self.output = output
 
-    def launch_analysis(self, access: "AccessStore", actor: "Actor", command: str):
-        """Start analysis in new tmux session (authorization re-checked)."""
-        if not self._authorized(access, actor):
-            return
+    def launch(self, command: str):
+        """Send an already-prepared command in a new tmux session."""
         session = self.tmux_manager.create_session(self.session_name)
         session.active_window.resize(width=500)  # Extra wide for no artificial \n
         assert session.active_pane is not None
@@ -258,6 +264,8 @@ class Analysis(Entity):
         # TODO: show edit and run time
         st.markdown(self.desc)
 
+        command = "snakemake -c 2"
+        self.show_dag(command)
         if self.workflow_manager.log_path:
             parent_tabs = st.tabs(["Datasets", "Logs"])
         else:
@@ -278,15 +286,56 @@ class Analysis(Entity):
         if self.can_run(actor, access) and c1.button(
             "Run Analysis", key=f"{self.address.__str__}-run_button"
         ):
-            command = (
-                f"cd {self.workflow_manager.workspace.data_path} && snakemake -c 2"
-            )
-            self.analysis_run_manager.launch_analysis(access, actor, command)
+            self.run_analysis(access, actor, command)
         if c2.button(
             "Check Status",
             key=f"{self.analysis_run_manager.analysis_name}-status_open",
         ):
             self.analysis_run_manager.show(access, actor)
+
+    def run_analysis(self, access, actor, command: str):
+        """Build/store the DAG before launching the workflow."""
+        if not self.analysis_run_manager or not self.analysis_run_manager._authorized(
+            access, actor
+        ):
+            return
+        dag_tracer = self.workflow_manager.dag_tracer
+        if dag_tracer.build_and_store(command) is None:
+            st.error("Failed to generate DAG; analysis not started.")
+            return
+        self.analysis_run_manager.launch(dag_tracer.attach_logger(command))
+        dag_tracer.refresh(command)
+
+    def show_dag(self, command: str):
+        """Show the DAG in a Streamlit component."""
+        dag_tracer = self.workflow_manager.dag_tracer
+        if dag_tracer.refresh(command):
+
+            @st.fragment(run_every=5)
+            def dag_status():
+                current = dag_tracer.refresh(command)
+                if not current:
+                    return
+                if dag_tracer.stale:
+                    st.warning(
+                        "Run history is much larger than this DAG; "
+                        "click 'Refresh state' to rebuild it."
+                    )
+                files = dag_tracer.files_frame()
+                if not files.is_empty():
+                    st.subheader("Expected files")
+                    st.dataframe(files[["path", "status"]], use_container_width=True)
+                process = current.get("progress", {})
+                if process:
+                    st.subheader("Expected jobs")
+                    st.dataframe(pl.DataFrame(process), use_container_width=True)
+
+            dag_status()
+
+        if st.button("Refresh state", key=f"{self.address.__str__}-dag_refresh"):
+            with st.spinner("Exporting DAG..."):
+                if dag_tracer.refresh(command, rebuild=True) is None:
+                    st.error("Failed to generate DAG.")
 
     @classmethod
     def load(cls, data_store, address):

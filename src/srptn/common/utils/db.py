@@ -14,15 +14,30 @@ from pathlib import Path
 class Database:
     """Owns a SQLite file and hands out connections and transactions."""
 
-    def __init__(self, path: str | Path) -> None:
+    def __init__(self, path: str | Path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
-    def connect(self) -> sqlite3.Connection:
+    def connect(self):
         conn = sqlite3.connect(str(self.path), isolation_level=None)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("PRAGMA busy_timeout = 5000")
+        return conn
+
+    def readonly(self):
+        if not self.path.exists():
+            return
+        try:
+            conn = sqlite3.connect(
+                f"{self.path.resolve().as_uri()}?mode=ro",
+                uri=True,
+                isolation_level=None,
+            )
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA busy_timeout = 5000")
+        except sqlite3.Error:
+            return
         return conn
 
     @contextmanager
