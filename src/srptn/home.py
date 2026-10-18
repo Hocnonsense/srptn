@@ -43,7 +43,7 @@ else:
             st.stop()
         st.title(f"Hello, {actor.role.label} {actor.id}!")
         change_password_form(service, session)
-        if st.button("Logout", use_container_width=True):
+        if st.button("Logout", width="stretch"):
             logout()
             st.rerun()
 

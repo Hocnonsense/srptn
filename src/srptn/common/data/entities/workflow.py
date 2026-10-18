@@ -81,7 +81,7 @@ class Workflow(Entity):
                     st.markdown("used fields:")
                     for field in spec.fields:
                         st.markdown("- " + ".".join(f"**{i}**" for i in field))
-                    st.dataframe(spec.example_table, use_container_width=True)
+                    st.dataframe(spec.example_table, width="stretch")
                     st.code(
                         yaml.safe_dump(spec.schema, sort_keys=False),
                         language="yaml",

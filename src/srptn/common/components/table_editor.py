@@ -78,7 +78,7 @@ def editable_table(
     edited = st.data_editor(
         st.session_state[base_key].to_pandas(),
         num_rows="dynamic",
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
         key=f"{key}-{st.session_state[revision_key]}",
         column_config=column_config,

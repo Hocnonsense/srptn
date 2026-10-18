@@ -324,11 +324,11 @@ class Analysis(Entity):
                 files = dag_tracer.files_frame()
                 if not files.is_empty():
                     st.subheader("Expected files")
-                    st.dataframe(files[["path", "status"]], use_container_width=True)
+                    st.dataframe(files[["path", "status"]], width="stretch")
                 process = current.get("progress", {})
                 if process:
                     st.subheader("Expected jobs")
-                    st.dataframe(pl.DataFrame(process), use_container_width=True)
+                    st.dataframe(pl.DataFrame(process), width="stretch")
 
             dag_status()
 

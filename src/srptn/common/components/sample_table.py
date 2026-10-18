@@ -65,7 +65,7 @@ def _display(frame: pl.DataFrame, key: str):
         frame = frame.with_columns(
             [pl.col(column).list.join(" ").alias(column) for column in lists]
         )
-    st.dataframe(frame, use_container_width=True, hide_index=True, key=f"{key}-preview")
+    st.dataframe(frame, width="stretch", hide_index=True, key=f"{key}-preview")
 
 
 def _select_common(
@@ -230,7 +230,7 @@ def _edit_rows(
     edited = st.data_editor(
         frame.to_pandas(),
         num_rows="dynamic",
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
         key=f"{key}-editor",
         column_config=column_config,

@@ -198,7 +198,7 @@ def _render_version_row(cached: CachedWorkflowManager, url: str, refs):
                     f"{value} ▾" if value is not None else "▾",
                     key=f"{key}-open",
                     help=_META_LABELS[key],
-                    use_container_width=True,
+                    width="stretch",
                     on_click=_toggle_picker,
                     args=(key,),
                 )

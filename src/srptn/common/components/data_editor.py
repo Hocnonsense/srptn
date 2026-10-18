@@ -212,7 +212,7 @@ def data_fill(key: str, frame: pl.DataFrame):
             st.dataframe(
                 data_modified,
                 height=250,
-                use_container_width=True,
+                width="stretch",
                 key=f"{key}-fill_preview_window",
             )
 
@@ -368,7 +368,7 @@ def process_user_code(key: str):
             preview_data = execute_custom_code(preview_data, key, user_code)
             st.dataframe(
                 preview_data,
-                use_container_width=True,
+                width="stretch",
                 key=f"{key}-advanced_manipulation_preview_window",
             )
             validate_data(key, preview_data)

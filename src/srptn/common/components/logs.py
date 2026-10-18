@@ -13,9 +13,8 @@ def log_selector(workflow_manager: "WorkflowManager"):
     The analysis has already been authorized (it was listed by ``AccessStore``),
     so its own logs need no further check.
     """
-    log_path = workflow_manager.log_path
-    if log_path:
-        log_file_names = workflow_manager.get_log_names()
+    log_file_names = workflow_manager.get_log_names()
+    if log_file_names:
         log_file_name = Path(st.selectbox(label="Select Log", options=log_file_names))
         log_file = workflow_manager.get_log(log_file_name)
         with st.container(height=450):
