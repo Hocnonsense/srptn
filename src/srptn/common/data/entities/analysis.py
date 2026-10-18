@@ -265,7 +265,7 @@ class Analysis(Entity):
         st.markdown(self.desc)
 
         command = "snakemake -c 2"
-        self.show_dag(command)
+        self.show_dag(access, actor, command)
         if self.workflow_manager.log_path:
             parent_tabs = st.tabs(["Datasets", "Logs"])
         else:
@@ -278,44 +278,51 @@ class Analysis(Entity):
                 ):
                     with dataset_tab:
                         st.dataframe(dataset.sheet)
-        if self.workflow_manager.log_path:
+        if len(parent_tabs) > 1:
             with parent_tabs[1]:
                 log_selector(self.workflow_manager)
 
-        c1, c2 = st.columns([0.21, 0.79])
-        if self.can_run(actor, access) and c1.button(
-            "Run Analysis", key=f"{self.address.__str__}-run_button"
-        ):
-            self.run_analysis(access, actor, command)
-        if c2.button(
+        if st.button(
             "Check Status",
             key=f"{self.analysis_run_manager.analysis_name}-status_open",
         ):
             self.analysis_run_manager.show(access, actor)
 
-    def run_analysis(self, access, actor, command: str):
-        """Build/store the DAG before launching the workflow."""
-        if not self.analysis_run_manager or not self.analysis_run_manager._authorized(
-            access, actor
-        ):
-            return
-        dag_tracer = self.workflow_manager.dag_tracer
-        if dag_tracer.build_and_store(command) is None:
-            st.error("Failed to generate DAG; analysis not started.")
-            return
-        self.analysis_run_manager.launch(dag_tracer.attach_logger(command))
-        dag_tracer.refresh(command)
+    @property
+    def _run_baseline_key(self):
+        return f"{self.address}-dag-run-baseline"
 
-    def show_dag(self, command: str):
+    @property
+    def _running_seen_key(self):
+        return f"{self.address}-dag-running-seen"
+
+    def show_dag(self, access: AccessStore, actor: Actor, command: str):
         """Show the DAG in a Streamlit component."""
         dag_tracer = self.workflow_manager.dag_tracer
-        if dag_tracer.refresh(command):
+        with st.spinner("Loading DAG..."):
+            dag = dag_tracer.refresh(command)
+        if dag:
+            running = dag_tracer.running or self._run_baseline_key in st.session_state
 
-            @st.fragment(run_every=5)
+            @st.fragment(run_every=5 if running else None)
             def dag_status():
                 current = dag_tracer.refresh(command)
                 if not current:
                     return
+                if dag_tracer.running:
+                    # running, switch to that signal
+                    st.session_state.pop(self._run_baseline_key, None)
+                    st.session_state[self._running_seen_key] = True
+                elif st.session_state.pop(self._running_seen_key, False):
+                    # running has stopped, stop rerun dag_status
+                    st.rerun(scope="app")
+                elif self._run_baseline_key in st.session_state:
+                    if (
+                        dag_tracer.workflow_id
+                        != st.session_state[self._run_baseline_key]
+                    ):  # a new run has started, switch to that signal
+                        st.session_state.pop(self._run_baseline_key, None)
+                        st.rerun(scope="app")
                 if dag_tracer.stale:
                     st.warning(
                         "Run history is much larger than this DAG; "
@@ -332,10 +339,37 @@ class Analysis(Entity):
 
             dag_status()
 
-        if st.button("Refresh state", key=f"{self.address.__str__}-dag_refresh"):
+        c1, c2 = st.columns([0.21, 0.79])
+        if c1.button("Refresh state", key=f"{self.address.__str__}-dag_refresh"):
             with st.spinner("Exporting DAG..."):
-                if dag_tracer.refresh(command, rebuild=True) is None:
-                    st.error("Failed to generate DAG.")
+                refreshed = dag_tracer.refresh(command, rebuild=True)
+            if refreshed is None:
+                st.error("Failed to generate DAG.")
+            else:
+                st.rerun()
+        if self.can_run(actor, access) and c2.button(
+            "Run Analysis", key=f"{self.address.__str__}-run_button"
+        ):
+            if self.run_analysis(access, actor, command):
+                st.rerun()
+
+    def run_analysis(self, access, actor, command: str) -> bool:
+        """Build/store the DAG before launching the workflow."""
+        if not self.analysis_run_manager or not self.analysis_run_manager._authorized(
+            access, actor
+        ):
+            return False
+        dag_tracer = self.workflow_manager.dag_tracer
+        if dag_tracer.build_and_store(command) is None:
+            st.error("Failed to generate DAG; analysis not started.")
+            return False
+        dag_tracer.logger_jobs()
+        baseline = dag_tracer.workflow_id
+        self.analysis_run_manager.launch(dag_tracer.attach_logger(command))
+        st.session_state[self._run_baseline_key] = baseline
+        st.session_state.pop(self._running_seen_key, None)
+        dag_tracer.refresh(command)
+        return True
 
     @classmethod
     def load(cls, data_store, address):

@@ -155,6 +155,10 @@ class DAGTracker:
         """According to the last logger query,
         the DAG is too old and should be rebuilt.
         """
+        self.workflow_id: str | None = None
+        """The latest workflow ID from the logger DB"""
+        self.running = False
+        """Whether the latest workflow is still running"""
 
     @property
     def _key(self):
@@ -236,12 +240,16 @@ class DAGTracker:
         st.session_state[self._auto_failed_key] = True
 
     def store(self, dag: dict):
-        """Persist the DAG; return the DAG that represents the stored state.
+        """Persist the DAG when appropriate; return the DAG for this session.
 
-        If the stored DAG is newer, it is returned instead of the incoming one.
-        Returns None for an invalid DAG.
+        Same topology:
+        - older/equal created_at -> keep the stored DAG;
+        - not stale -> use the fresh DAG in memory without touching disk;
+        - stale -> read the last two files:
+          overwrite the latest when it is a duplicate of the previous one,
+          otherwise create a new version.
+        Different topology -> create a new version.
         """
-
         created_at = dag.get("created_at")
         if created_at is None:
             return None
@@ -255,11 +263,15 @@ class DAGTracker:
                 old_created = last.get("created_at")
                 if old_created is not None and created_at <= old_created:
                     return last
+                if not self.stale:
+                    return dag
                 duplicate = False
                 if len(files) >= 2:
                     old = _load(files[-2][1])
                     duplicate = bool(old) and _signature(old) == signature
-                index -= duplicate
+                if duplicate and file:
+                    _write(file, payload)
+                    return dag
         path = self.dag_basepath / f"topology.{index + 1}.json"
         _write(path, payload)
         return dag
@@ -270,6 +282,8 @@ class DAGTracker:
         Inform stale if too many jobs after the last DAG created
         """
         self.stale = False
+        self.running = False
+        self.workflow_id = None
         conn = self.conn
         if conn is None:
             return None
@@ -286,6 +300,17 @@ class DAGTracker:
         total_jobs = sum(1 for n in (dag or {}).get("nodes", []) if "rule_name" in n)
         limit = max(total_jobs * HISTORY_FACTOR, MIN_REBUILT_JOBS)
         try:
+            workflow = conn.execute(
+                "SELECT id, status, end_time FROM workflows "
+                "ORDER BY COALESCE(started_at, 0) DESC, rowid DESC LIMIT 1"
+            ).fetchone()
+            if workflow is not None:
+                self.workflow_id = workflow["id"]
+                self.running = (
+                    workflow["status"] == STATUS_RUNNING
+                    and workflow["end_time"] is None
+                )
+
             jobs: dict[str, dict] = {}
             job_rows = conn.execute(
                 "SELECT j.* FROM jobs j JOIN workflows w ON w.id = j.workflow_id "
@@ -317,6 +342,8 @@ class DAGTracker:
         except sqlite3.Error:
             self.close()
             self.stale = False
+            self.running = False
+            self.workflow_id = None
             return None
 
     def update_jobs(self, dag: dict):
@@ -379,9 +406,9 @@ class DAGTracker:
     def refresh(self, command: str | None = None, *, rebuild: bool = False):
         """Merge logger status;
         rebuild exactly one time automatically when the history is stale."""
-        if rebuild and command:
-            if not self.build_and_store(command):
-                return
+        if command and (rebuild or not self.dag):
+            if not self.build_and_store(command) and rebuild:
+                return  # failed to rebuild, report the bad news
         if not self.dag:
             return
         self.dag = self.update_jobs(self.dag)
