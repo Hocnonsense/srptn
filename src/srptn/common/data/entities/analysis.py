@@ -1,4 +1,3 @@
-import io
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -439,8 +438,7 @@ class Analysis(Entity):
         self.write_entity(workspace)
 
         if files is not None:
-            for name, content in files.items():
-                workspace.store_file(io.BytesIO(content), name, file_type=FileType.DATA)
+            workspace.store_init_files(files)
         else:  # TODO: remove this legacy path once the new workflow is fully adopted
             dataset_entities = {
                 str(dataset.address): dataset.list_files(FileType.DATA)[
@@ -490,3 +488,17 @@ class Analysis(Entity):
             pl.concat(updated_groups) if len(updated_groups) > 1 else updated_groups[0]
         )
         save_data_table(updated_data, path_obj)
+
+    def workflow_files(self):
+        """original files and generated files in the workflow directory.
+
+        All recorded previously
+        """
+        for path in self.workflow_manager.workspace.list_init_files():
+            file = self.workflow_manager.workspace.data_path / path
+            if file.exists():
+                yield path
+        frame = self.workflow_manager.dag_tracer.files_frame()
+        if not frame.is_empty():
+            for path in frame.filter(pl.col("size").is_not_null())["path"].to_list():
+                yield path

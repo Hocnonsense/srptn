@@ -419,7 +419,7 @@ class DAGTracker:
         return self.dag
 
     def files_frame(self):
-        dag = self.dag or {}
+        dag = self.refresh() or {}
         rows = []
         base = Path(self.data_path)
         for node in dag.get("nodes", []):

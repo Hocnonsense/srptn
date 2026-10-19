@@ -5,7 +5,15 @@ import polars as pl
 import streamlit as st
 from streamlit.runtime.uploaded_file_manager import UploadedFile
 
-TABLE_EXTENSIONS = (".tsv", ".csv", ".xlsx")
+TABLE_EXTENSIONS = (".tsv", ".csv", ".xlsx", ".parquet")
+
+
+def table_suffix(file: str | Path):
+    """Return the suffix of a supported table file, else ``None``"""
+    file = str(file)
+    for ext in TABLE_EXTENSIONS:
+        if file.lower().endswith(ext):
+            return ext
 
 
 def read_table(
@@ -14,13 +22,15 @@ def read_table(
     *,
     suffix: str | None = None,
     infer: bool = False,
+    limit: int | None = None,
 ) -> pl.DataFrame | None:
     """Read a table by extension, or ``None`` when unreadable/unsupported.
 
     ``source`` is a path or a binary buffer/-stream; pass ``suffix`` when it is
     not a path.  ``schema`` gives strict per-column dtype overrides; ``infer``
-    selects how the remaining columns are read.  Combining them yields four
-    modes:
+    selects how the remaining columns are read.  ``limit`` caps the rows read
+    where the parser supports it (and truncates the rest afterwards).
+    Combining them yields four modes:
 
     ============ ===================================================
     (None, False) every column as string (``infer_schema_length=0``),
@@ -37,12 +47,15 @@ def read_table(
     )
     suffix = (suffix or getattr(source, "suffix", "")).lower()
     try:
+        if suffix == ".parquet":
+            return pl.read_parquet(source, n_rows=limit)
         if suffix == ".tsv":
-            return pl.read_csv(source, separator="\t", **kwargs)
+            return pl.read_csv(source, separator="\t", n_rows=limit, **kwargs)
         if suffix == ".csv":
-            return pl.read_csv(source, **kwargs)
+            return pl.read_csv(source, n_rows=limit, **kwargs)
         if suffix == ".xlsx":
-            return pl.read_excel(source, **kwargs)
+            table = pl.read_excel(source, **kwargs)
+            return table.head(limit) if limit is not None else table
     except Exception:
         return None
     return None

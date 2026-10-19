@@ -20,6 +20,8 @@ if TYPE_CHECKING:
     from .fs import FSDataStore
 
 LOCK_NAME = ".lock"
+INIT_FILES = "init_files.txt"
+"""Meta file recording paths written by :meth:`Analysis.store`."""
 
 
 class Workspace:
@@ -77,6 +79,24 @@ class Workspace:
             if default is not None:
                 return default
             raise
+
+    def store_init_files(self, files: dict[str, bytes]):
+        """Store the given files in ``init_files/`` and update the manifest."""
+        for name, content in files.items():
+            self.store_file(io.BytesIO(content), name, file_type=FileType.DATA)
+            self.write_meta(f"init_files/{name}", content.decode())
+        self.write_meta(INIT_FILES, "\n".join(sorted(files)))
+
+    def list_init_files(self):
+        """Return the list of files stored in ``init_files/``."""
+        text = self.read_meta(INIT_FILES, "")
+        for line in text.splitlines():
+            if line:
+                yield line
+
+    def get_init_file(self, name: str):
+        """Return the content of a file stored in ``init_files/``."""
+        return self.read_meta(f"init_files/{name}")
 
     # --- lifecycle ------------------------------------------------------
 

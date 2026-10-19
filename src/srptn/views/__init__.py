@@ -57,6 +57,7 @@ def visible_pages(actor: Actor):
     from .analysis_new import page_new_analysis
     from .dataset_new import page_new_dataset
     from .datasets import page_datasets
+    from .figure_edit import page_figure_edit
     from .workflow_new import page_new_workflow
     from .workflows import page_workflows
 
@@ -67,6 +68,7 @@ def visible_pages(actor: Actor):
         page_workflows,
         page_new_analysis,
         page_analyses,
+        page_figure_edit,
         PageInfo("views/5 Notebook (Mockup).py", "Notebook (Mockup)", None),
         PageInfo("views/6 Compose Figure (Mockup).py", "Compose Figure (Mockup)", None),
     ):
