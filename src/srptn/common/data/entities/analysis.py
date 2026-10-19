@@ -160,7 +160,8 @@ class WorkflowManager:
     def get_log_names(self) -> list[str]:
         """Gather names of all available logs."""
         if self.log_path:
-            return [logfile.name for logfile in list(self.log_path.iterdir())]
+            names = [logfile.name for logfile in list(self.log_path.iterdir())]
+            return [i for i in names if i.endswith(".snakemake.log")]
         return []
 
     def get_schema(self, item: str) -> dict | None:
@@ -290,11 +291,16 @@ class Analysis(Entity):
 
     @property
     def _run_baseline_key(self):
+        """Session-state key for the workflow ID before this analysis run.
+
+        Used to detect the newer workflow created by the logger.
+        """
         return f"{self.address}-dag-run-baseline"
 
     @property
-    def _running_seen_key(self):
-        return f"{self.address}-dag-running-seen"
+    def _tracked_workflow_key(self):
+        """``dag_status`` stops polling once this workflow is no longer running."""
+        return f"{self.address}-dag-tracked-workflow"
 
     def show_dag(self, access: AccessStore, actor: Actor, command: str):
         """Show the DAG in a Streamlit component."""
@@ -302,27 +308,46 @@ class Analysis(Entity):
         with st.spinner("Loading DAG..."):
             dag = dag_tracer.refresh(command)
         if dag:
-            running = dag_tracer.running or self._run_baseline_key in st.session_state
+            watching = (
+                dag_tracer.running
+                or self._run_baseline_key in st.session_state
+                or self._tracked_workflow_key in st.session_state
+            )
 
-            @st.fragment(run_every=5 if running else None)
+            @st.fragment(run_every=5 if watching else None)
             def dag_status():
                 current = dag_tracer.refresh(command)
                 if not current:
                     return
-                if dag_tracer.running:
-                    # running, switch to that signal
-                    st.session_state.pop(self._run_baseline_key, None)
-                    st.session_state[self._running_seen_key] = True
-                elif st.session_state.pop(self._running_seen_key, False):
-                    # running has stopped, stop rerun dag_status
-                    st.rerun(scope="app")
-                elif self._run_baseline_key in st.session_state:
+                baseline = st.session_state.get(self._run_baseline_key)
+                tracked = st.session_state.get(self._tracked_workflow_key)
+                if self._run_baseline_key in st.session_state:
+                    # Keep polling after launch until the logger identifies a
+                    # workflow newer than the one that existed before launch.
                     if (
+                        dag_tracer.workflow_id is not None
+                        and dag_tracer.workflow_id != baseline
+                    ):
+                        st.session_state.pop(self._run_baseline_key)
+                        st.session_state[self._tracked_workflow_key] = (
+                            dag_tracer.workflow_id
+                        )
+                        tracked = dag_tracer.workflow_id
+                elif tracked is None and dag_tracer.running:
+                    # The page can also be opened while a workflow is already
+                    # running; track that workflow until it finishes.
+                    st.session_state[self._tracked_workflow_key] = (
                         dag_tracer.workflow_id
-                        != st.session_state[self._run_baseline_key]
-                    ):  # a new run has started, switch to that signal
-                        st.session_state.pop(self._run_baseline_key, None)
-                        st.rerun(scope="app")
+                    )
+                    tracked = dag_tracer.workflow_id
+
+                if tracked is not None and (
+                    dag_tracer.workflow_id != tracked or not dag_tracer.running
+                ):
+                    # The tracked workflow has finished (or a newer one has
+                    # superseded it), so rerun the app without run_every.
+                    st.session_state.pop(self._tracked_workflow_key, None)
+                    st.rerun(scope="app")
                 if dag_tracer.stale:
                     st.warning(
                         "Run history is much larger than this DAG; "
@@ -334,7 +359,9 @@ class Analysis(Entity):
                     st.dataframe(files[["path", "status"]], width="stretch")
                 process = current.get("progress", {})
                 if process:
-                    st.subheader("Expected jobs")
+                    st.subheader(
+                        "Analysis running" if dag_tracer.running else "Expected jobs"
+                    )
                     st.dataframe(pl.DataFrame(process), width="stretch")
 
             dag_status()
@@ -361,13 +388,13 @@ class Analysis(Entity):
             return False
         dag_tracer = self.workflow_manager.dag_tracer
         if dag_tracer.build_and_store(command) is None:
-            st.error("Failed to generate DAG; analysis not started.")
+            st.error("Failed to generate DAG; analysis cannot started.")
             return False
         dag_tracer.logger_jobs()
         baseline = dag_tracer.workflow_id
         self.analysis_run_manager.launch(dag_tracer.attach_logger(command))
         st.session_state[self._run_baseline_key] = baseline
-        st.session_state.pop(self._running_seen_key, None)
+        st.session_state.pop(self._tracked_workflow_key, None)
         dag_tracer.refresh(command)
         return True
 

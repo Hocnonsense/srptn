@@ -65,7 +65,7 @@ def run_tables(
         config_file.write_text(yaml.safe_dump(produced, sort_keys=False))
         files = collect_files(cwd)
 
-    errors.extend(map(str, validation_errors(produced, internal_schema)))
+    errors.extend(validation_errors(produced, internal_schema, True))
     errors.extend(_validate_files(files, schema_dir, skip={config_target}))
     return files, produced
 
@@ -110,6 +110,6 @@ def _validate_files(files: dict[str, bytes], schema_dir: Path | None, skip: set[
             parsed, _ = coerce_frame(parsed, schema)
             errors.extend(f"{name} {issue}" for issue in table_errors(parsed, schema))
         elif isinstance(parsed, (dict, list)):
-            for violation in validation_errors(parsed, schema):
+            for violation in validation_errors(parsed, schema, True):
                 errors.append(f"{name}: {violation}")
     return errors

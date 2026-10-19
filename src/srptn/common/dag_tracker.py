@@ -150,7 +150,6 @@ class DAGTracker:
         self.address = workspace.address
         self.data_path = workspace.data_path
         self.dag_basepath = workspace.meta_path / DAG_DIR
-        self._conn: sqlite3.Connection | None = None
         self.stale = False
         """According to the last logger query,
         the DAG is too old and should be rebuilt.
@@ -178,17 +177,10 @@ class DAGTracker:
 
     @property
     def conn(self):
-        if self._conn is None:
-            from .utils.db import Database
+        from .utils.db import Database
 
-            _db = Database(self.data_path / DB_RELPATH)
-            self._conn = _db.readonly()
-        return self._conn
-
-    def close(self):
-        if self._conn is not None:
-            self._conn.close()
-            self._conn = None
+        _db = Database(self.data_path / DB_RELPATH)
+        return _db.readonly()
 
     @property
     def topology_files(self):
@@ -204,7 +196,7 @@ class DAGTracker:
         return (
             f'export PYTHONPATH="{PLUGIN_DIR}:$PYTHONPATH"; '
             f'cd "{self.data_path}" && {snakemake_command} '
-            f'--logger srp-dag --logger-srp-dag-db "{self.data_path / DB_RELPATH}"'
+            f'--logger srp-dag --logger-srp-dag-db "{DB_RELPATH}"'
         )
 
     def build_from(self, snakemake_command: str) -> dict | None:
@@ -284,9 +276,11 @@ class DAGTracker:
         self.stale = False
         self.running = False
         self.workflow_id = None
+
         conn = self.conn
         if conn is None:
             return None
+
         dag = self.dag
         since = dag.get("created_at") if dag else None
         if since is None:
@@ -300,47 +294,47 @@ class DAGTracker:
         total_jobs = sum(1 for n in (dag or {}).get("nodes", []) if "rule_name" in n)
         limit = max(total_jobs * HISTORY_FACTOR, MIN_REBUILT_JOBS)
         try:
-            workflow = conn.execute(
-                "SELECT id, status, end_time FROM workflows "
-                "ORDER BY COALESCE(started_at, 0) DESC, rowid DESC LIMIT 1"
-            ).fetchone()
-            if workflow is not None:
-                self.workflow_id = workflow["id"]
-                self.running = (
-                    workflow["status"] == STATUS_RUNNING
-                    and workflow["end_time"] is None
-                )
+            with conn:
+                workflow = conn.execute(
+                    "SELECT id, status, end_time FROM workflows "
+                    "ORDER BY COALESCE(started_at, 0) DESC, rowid DESC LIMIT 1"
+                ).fetchone()
+                if workflow is not None:
+                    self.workflow_id = workflow["id"]
+                    self.running = (
+                        workflow["status"] == STATUS_RUNNING
+                        and workflow["end_time"] is None
+                    )
 
-            jobs: dict[str, dict] = {}
-            job_rows = conn.execute(
-                "SELECT j.* FROM jobs j JOIN workflows w ON w.id = j.workflow_id "
-                f"{where} "
-                "ORDER BY COALESCE(w.started_at, 0) DESC, w.rowid DESC, "
-                "j.jobid DESC LIMIT ?",
-                (*params, limit + 1),
-            ).fetchall()
-            if not job_rows:
+                jobs: dict[str, dict] = {}
+                job_rows = conn.execute(
+                    "SELECT j.* FROM jobs j JOIN workflows w ON w.id = j.workflow_id "
+                    f"{where} "
+                    "ORDER BY COALESCE(w.started_at, 0) DESC, w.rowid DESC, "
+                    "j.jobid DESC LIMIT ?",
+                    (*params, limit + 1),
+                ).fetchall()
+                if not job_rows:
+                    return jobs
+
+                self.stale = bool(total_jobs) and len(job_rows) > limit
+                for row in job_rows:
+                    wildcards = json.loads(row["wildcards"] or "{}")
+                    key = _job_key(row["rule_name"], wildcards)
+                    if key in jobs:
+                        continue
+                    jobs[key] = {
+                        "rule_name": row["rule_name"],
+                        "wildcards": wildcards,
+                        "status": row["status"],
+                        "workflow_id": row["workflow_id"],
+                        "threads": row["threads"],
+                        "reason": row["reason"],
+                        "started_at": row["started_at"],
+                        "end_time": row["end_time"],
+                    }
                 return jobs
-
-            self.stale = bool(total_jobs) and len(job_rows) > limit
-            for row in job_rows:
-                wildcards = json.loads(row["wildcards"] or "{}")
-                key = _job_key(row["rule_name"], wildcards)
-                if key in jobs:
-                    continue
-                jobs[key] = {
-                    "rule_name": row["rule_name"],
-                    "wildcards": wildcards,
-                    "status": row["status"],
-                    "workflow_id": row["workflow_id"],
-                    "threads": row["threads"],
-                    "reason": row["reason"],
-                    "started_at": row["started_at"],
-                    "end_time": row["end_time"],
-                }
-            return jobs
         except sqlite3.Error:
-            self.close()
             self.stale = False
             self.running = False
             self.workflow_id = None

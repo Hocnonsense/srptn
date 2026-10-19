@@ -147,8 +147,8 @@ def workflow_editor(
             st.error(f"Schema error: {message}")
     if isinstance(config, dict) and not schema_messages:
         success = True
-        for message in validation_errors(config, runner_schema):
-            st.error(str(message))
+        for message in validation_errors(config, runner_schema, True):
+            st.error(message)
             success = False
         if success:
             st.success("Config matches the schema.")

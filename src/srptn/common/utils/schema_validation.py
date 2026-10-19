@@ -10,10 +10,10 @@ their declared types before validation (see
 from __future__ import annotations
 
 from functools import cache
-from typing import Mapping, NamedTuple, overload
+from typing import Generator, Literal, Mapping, overload
 
 import jsonschema.validators
-from jsonschema.exceptions import SchemaError
+from jsonschema.exceptions import SchemaError, ValidationError
 from jsonschema.protocols import Validator
 
 from .yaml_utils import SCIENTIFIC_FLOAT
@@ -49,18 +49,15 @@ def _extended_validator(base: type[Validator]) -> type[Validator]:
     )
 
 
-class Violation(NamedTuple):
-    """A single schema violation: the instance path and the raw message."""
-
-    path: tuple
-    message: str
-
-    def __str__(self):
-        where = "/".join(str(part) for part in self.path) or "<root>"
-        return f"{where}: {self.message}"
-
-
-def validation_errors(instance, schema: Mapping | None):
+@overload
+def validation_errors(
+    instance, schema: Mapping | None, str: Literal[True]
+) -> Generator[str, None, None]: ...
+@overload
+def validation_errors(
+    instance, schema: Mapping | None, str: Literal[False] = False
+) -> Generator[ValidationError, None, None]: ...
+def validation_errors(instance, schema: Mapping | None, str: bool = False):
     """Return the jsonschema violations of ``instance`` as :class:`Violation`\\ s.
 
     Callers decide how to present them (``str(violation)`` renders ``path: msg``).
@@ -70,8 +67,12 @@ def validation_errors(instance, schema: Mapping | None):
     schema = sanitize_schema(schema)
     base = jsonschema.validators.validator_for(schema)
     validator = _extended_validator(base)(schema)
-    for error in validator.iter_errors(instance):
-        yield Violation(tuple(error.absolute_path), error.message)
+    if str:
+        for self in validator.iter_errors(instance):
+            where = "/".join(f"{part}" for part in self.absolute_path) or "<root>"
+            yield f"{where}: {self.message}"
+    else:
+        yield from validator.iter_errors(instance)
 
 
 def schema_errors(schema: Mapping | None):

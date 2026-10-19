@@ -41,7 +41,9 @@ def table_errors(table: pl.DataFrame, schema: Mapping | None):
         return errors
     for index, row in enumerate(table.iter_rows(named=True)):
         for violation in validation_errors(validate_values(row), schema):
-            column = str(violation.path[0]) if violation.path else None
+            column = (
+                str(violation.absolute_path[0]) if violation.absolute_path else None
+            )
             errors.append(Issue(violation.message, row=index, column=column))
     return errors
 
