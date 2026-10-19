@@ -10,7 +10,6 @@ import yaml
 from snakedeploy.exceptions import UserError
 
 from ...dag_tracker import DAGTracker
-from ...components.logs import log_selector
 from ...tmux import TmuxSessionManager
 from ...utils.table_utils import load_data_table, save_data_table
 from ...utils.snakedeploy import Version
@@ -267,21 +266,11 @@ class Analysis(Entity):
 
         command = "snakemake -c 2"
         self.show_dag(access, actor, command)
-        if self.workflow_manager.log_path:
-            parent_tabs = st.tabs(["Datasets", "Logs"])
-        else:
-            parent_tabs = st.tabs(["Datasets"])
-        with parent_tabs[0]:
-            if self.datasets:
-                dataset_tabs = st.tabs([str(data.address) for data in self.datasets])
-                for dataset_tab, dataset in zip(
-                    dataset_tabs, self.datasets, strict=True
-                ):
-                    with dataset_tab:
-                        st.dataframe(dataset.sheet)
-        if len(parent_tabs) > 1:
-            with parent_tabs[1]:
-                log_selector(self.workflow_manager)
+        if self.datasets:
+            dataset_tabs = st.tabs([str(data.address) for data in self.datasets])
+            for dataset_tab, dataset in zip(dataset_tabs, self.datasets, strict=True):
+                with dataset_tab:
+                    st.dataframe(dataset.sheet)
 
         if st.button(
             "Check Status",
@@ -355,12 +344,15 @@ class Analysis(Entity):
                     )
                 files = dag_tracer.files_frame()
                 if not files.is_empty():
-                    st.subheader("Expected files")
-                    st.dataframe(files[["path", "status"]], width="stretch")
+                    st.subheader("Files")
+                    st.dataframe(
+                        files[["path", "updated_at", "size"]],
+                        width="stretch",
+                    )
                 process = current.get("progress", {})
                 if process:
                     st.subheader(
-                        "Analysis running" if dag_tracer.running else "Expected jobs"
+                        "Analysis running" if dag_tracer.running else "Analysis states"
                     )
                     st.dataframe(pl.DataFrame(process), width="stretch")
 

@@ -14,6 +14,7 @@ import sqlite3
 import subprocess
 import sys
 from copy import deepcopy
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -420,17 +421,33 @@ class DAGTracker:
     def files_frame(self):
         dag = self.dag or {}
         rows = []
+        base = Path(self.data_path)
         for node in dag.get("nodes", []):
             if "rule_name" not in node:
                 continue
             wildcards = json.dumps(node.get("wildcards", {}), sort_keys=True)
+            status = node.get("status", STATUS_PENDING)
             for path in node.get("output", []):
+                updated_at = None
+                size = None
+                if status != STATUS_PENDING:
+                    file = Path(path)
+                    target = file if file.is_absolute() else base / file
+                    try:
+                        stat = target.stat()
+                    except OSError:
+                        pass
+                    else:
+                        updated_at = datetime.fromtimestamp(stat.st_mtime)
+                        size = stat.st_size
                 rows.append(
                     {
                         "path": path,
                         "rule_name": node["rule_name"],
                         "wildcards": wildcards,
-                        "status": node.get("status", STATUS_PENDING),
+                        "status": status,
+                        "updated_at": updated_at,
+                        "size": size,
                     }
                 )
         return pl.DataFrame(rows)
