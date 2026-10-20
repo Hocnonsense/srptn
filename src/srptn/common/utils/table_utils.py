@@ -57,8 +57,7 @@ def read_table(
             table = pl.read_excel(source, **kwargs)
             return table.head(limit) if limit is not None else table
     except Exception:
-        return None
-    return None
+        pass
 
 
 def enforce_typing(data: pl.DataFrame, schema: dict) -> pl.DataFrame:
