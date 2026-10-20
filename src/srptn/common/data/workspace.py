@@ -56,16 +56,16 @@ class Workspace:
     def has_sheet(self, name: str):
         return self.store.has_sheet(self.address, name)
 
-    def load_file(self, path: str, file_type: FileType):
+    def load_file(self, path: str, file_type=FileType.DATA):
         return self.store.load_file(self.address, path, file_type)
 
     def store_file(self, file, path: str, file_type: FileType):
         self.store.store_file(self.address, file, path, file_type)
 
-    def has_file(self, path: str, file_type: FileType):
+    def has_file(self, path: str, file_type=FileType.DATA):
         return self.store.has_file(self.address, path, file_type)
 
-    def list_files(self, file_type: FileType):
+    def list_files(self, file_type=FileType.DATA):
         return self.store.list_files(self.address, file_type)
 
     def write_meta(self, name: str, text: str):
