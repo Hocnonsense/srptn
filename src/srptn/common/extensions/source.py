@@ -18,24 +18,15 @@ from ..utils.table_utils import read_table, table_suffix
 if TYPE_CHECKING:
     from ..data.workspace import Workspace
 
-PREVIEW_ROWS = 500
-MAX_PREVIEW_ROWS = 5000
 
-
-def read_table_preview(
-    workspace: "Workspace",
-    logical_path: str,
-    limit: int = PREVIEW_ROWS,
-):
-    """Read at most ``limit`` rows from a table inside the workspace."""
-    limit = max(1, min(int(limit), MAX_PREVIEW_ROWS))
+def read_table_full(workspace: "Workspace", logical_path: str):
+    """Read a full table from the workspace, or ``None`` if it is unavailable."""
     try:
         with workspace.load_file(logical_path, FileType.DATA) as handle:
             return read_table(
                 handle,
                 suffix=table_suffix(logical_path),
                 infer=True,
-                limit=limit,
             )
     except OSError:
         return None

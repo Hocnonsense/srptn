@@ -3,3 +3,16 @@ datastore
 .vscode
 .
 pixi.lock
+node_modules
+dist
+coverage
+src/srptn/common/components/figure_editor_dist
+
+!*.py
+!*.ts
+!*.tsx
+!*.json
+!*.css
+!*.html
+!*.svg
+!*.toml

@@ -1,0 +1,82 @@
+.channel-scope {
+  margin-left: auto;
+  margin-bottom: 0;
+}
+
+.channel-list {
+  margin-top: 6px;
+}
+
+.channel-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+}
+
+.channel-key {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.channel-select {
+  min-width: 0;
+  field-sizing: content;
+}
+
+.type-select-wrap {
+  position: relative;
+  flex: none;
+  width: 24px;
+  height: 24px;
+}
+
+.type-select {
+  position: absolute;
+  inset: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: transparent;
+  appearance: none;
+  cursor: pointer;
+  font-size: 12px;
+  text-align: center;
+}
+
+.type-select option {
+  color: #0f172a;
+  text-align: center;
+}
+
+.type-select-value {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.channel-equals {
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+.field-select {
+  flex: 1 1 120px;
+  min-width: 100px;
+  max-width: 100%;
+  field-sizing: content;
+}
+
+.fn-select {
+  flex: none;
+}
+
+.channel-param {
+  flex: none;
+  width: 90px;
+}

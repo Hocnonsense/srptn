@@ -1,0 +1,24 @@
+.theme-panel summary {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #334155;
+}
+
+.theme-grid,
+.theme-section {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 10px;
+}
+
+.theme-panel .control-row {
+  margin: 3px 0;
+}
+
+.theme-section {
+  margin-top: 8px;
+  border-top: 1px dashed #e2e8f0;
+  padding-top: 6px;
+}

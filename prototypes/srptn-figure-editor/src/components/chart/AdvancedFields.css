@@ -1,0 +1,18 @@
+.advanced-panel summary {
+  display: flex;
+  justify-content: space-between;
+  cursor: pointer;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.advanced-row .field-label {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.advanced-row textarea {
+  min-height: 54px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}

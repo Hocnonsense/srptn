@@ -1,0 +1,7 @@
+[project]
+name = "srptn"
+version = "0.1.0"
+
+[[tool.streamlit.component.components]]
+name = "figure_editor"
+asset_dir = "common/components/figure_editor_dist"

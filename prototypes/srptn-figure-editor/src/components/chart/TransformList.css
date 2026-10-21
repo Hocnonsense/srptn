@@ -1,0 +1,51 @@
+.transform-row {
+  display: grid;
+  grid-template-columns: 28px 44px auto auto minmax(100px, 1fr);
+  gap: 6px;
+  align-items: center;
+}
+
+.transform-row-calculate {
+  grid-template-columns: 28px 60px auto minmax(120px, 1fr);
+}
+
+.transform-row-derive {
+  grid-template-columns: 28px 60px auto minmax(80px, 1fr) minmax(80px, 1fr);
+}
+
+.transform-row select {
+  width: auto;
+  min-width: 0;
+  max-width: 240px;
+  justify-self: start;
+  field-sizing: content;
+}
+
+.transform-kind {
+  color: #475569;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.transform-row.unused {
+  opacity: 0.55;
+}
+
+.transform-row.unused .transform-kind::after {
+  content: " · unused";
+  color: #94a3b8;
+  font-weight: 400;
+}
+
+.transform-raw {
+  overflow: hidden;
+  color: #64748b;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transform-row input {
+  width: 100%;
+  min-width: 0;
+}
