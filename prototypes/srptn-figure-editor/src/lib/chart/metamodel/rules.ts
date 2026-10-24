@@ -76,13 +76,23 @@ interface ChannelSpec {
   marks?: { allowed: ReadonlySet<string>; reason: string }; // undefined = 不限 mark
 }
 
-export function channelTypes(channel: Channel): readonly VegaType[] {
-  const spec: ChannelSpec = CHANNEL_SPECS[channel];
+export function channelTypes(channel: SharedChannel): readonly VegaType[] {
+  if (channel in FACET_CHANNEL_SPECS) {
+    const spec = FACET_CHANNEL_SPECS[channel as FacetChannel];
+    return spec.types ?? VEGA_TYPES;
+  }
+  const spec: ChannelSpec = CHANNEL_SPECS[channel as Channel];
   return spec.types ?? VEGA_TYPES;
 }
 
-export function markChannelRule(mark: string, channel: Channel): ChannelRule {
-  const spec: ChannelSpec = CHANNEL_SPECS[channel];
+export function markChannelRule(
+  mark: string,
+  channel: SharedChannel,
+): ChannelRule {
+  if (channel in FACET_CHANNEL_SPECS) {
+    return { status: "available" };
+  }
+  const spec: ChannelSpec = CHANNEL_SPECS[channel as Channel];
   const rule = spec.marks;
   if (rule && !rule.allowed.has(mark)) {
     return { status: "invalid", reason: rule.reason };
@@ -92,7 +102,7 @@ export function markChannelRule(mark: string, channel: Channel): ChannelRule {
 
 export function fieldStatus(
   mark: string,
-  channel: Channel,
+  channel: SharedChannel,
   fieldType: VegaType,
 ): ChannelRule {
   const markRule = markChannelRule(mark, channel);

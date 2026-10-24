@@ -1,81 +1,77 @@
 import type { ChannelState } from "../state/types";
 import type { VegaType } from "../schema/table-schema";
-import { DERIVE_SPECS, TIME_UNITS } from "./transforms";
+import { aggregateName } from "./aggregate";
+import type { DeriveControl, EncodingDeriveKind } from "./transforms";
+import {
+  DERIVE_SPECS,
+  createDerivedTransform,
+  deriveControls,
+  derivedName,
+  makeTransform,
+  readTransform,
+  withTransformMetadata,
+} from "./transforms";
 
-interface ChannelFnParam {
-  key: string;
-  kind: "number" | "select";
-  options?: readonly string[];
-  placeholder?: string;
-  min?: number;
+interface ChannelFnParam extends DeriveControl {
   value: (state: ChannelState) => unknown;
   patch: (value: unknown) => Partial<ChannelState>;
 }
 
-const CHANNEL_FN_PARAMS: Record<string, ChannelFnParam[]> = {
-  bin: [
-    {
-      key: "maxbins",
-      kind: "number",
-      placeholder: "maxbins",
-      min: 2,
-      value: (state) =>
-        state.bin && typeof state.bin === "object"
-          ? (state.bin as Record<string, unknown>).maxbins
-          : undefined,
-      patch: (value) => ({
-        bin:
-          value === undefined || value === ""
-            ? true
-            : { maxbins: Number(value) },
-      }),
-    },
-  ],
-  timeUnit: [
-    {
-      key: "timeUnit",
-      kind: "select",
-      options: TIME_UNITS,
-      value: (state) => state.timeUnit,
-      patch: (value) => ({ timeUnit: String(value) }),
-    },
-  ],
-};
-
-export function channelFnParams(kind: string): ChannelFnParam[] {
-  return CHANNEL_FN_PARAMS[kind] ?? [];
-}
-
-export const ENCODING_DERIVE_KINDS = Object.keys(DERIVE_SPECS).filter(
+export const ENCODING_DERIVE_KINDS = (
+  Object.keys(DERIVE_SPECS) as (keyof typeof DERIVE_SPECS)[]
+).filter(
   (kind) =>
-    kind !== "calculate" &&
-    DERIVE_SPECS[kind as keyof typeof DERIVE_SPECS].encoding,
-);
+    kind !== "calculate" && DERIVE_SPECS[kind].encoding,
+) as EncodingDeriveKind[];
 
 type ChannelFnKind = "none" | "aggregate" | string;
+
+export function channelFnParams(kind: string): ChannelFnParam[] {
+  const derive = channelDerive(kind);
+  if (!derive?.encoding || !derive.channelKey) {
+    return [];
+  }
+  return deriveControls(kind as keyof typeof DERIVE_SPECS).map(
+    (control): ChannelFnParam => ({
+      ...control,
+      value: (state: ChannelState): unknown => {
+        const derived = channelDeriveState(kind, state) as
+          | Record<string, unknown>
+          | undefined;
+        return derived?.[control.key];
+      },
+      patch: (next: unknown): Partial<ChannelState> => {
+        const transform = makeTransform(
+          kind as keyof typeof DERIVE_SPECS,
+          { [control.key]: next } as never,
+        );
+        return {
+          [derive.channelKey as string]: transform[derive.channelKey as string],
+        } as Partial<ChannelState>;
+      },
+    }),
+  );
+}
 
 export function channelFnAllowed(
   kind: string,
   fieldType: VegaType | undefined,
 ): boolean {
-  if (kind === "bin") {
-    return fieldType === "quantitative" || fieldType === "temporal";
+  const derive = channelDerive(kind);
+  if (!derive?.sourceTypes) {
+    return true;
   }
-  if (kind === "timeUnit") {
-    return fieldType === "temporal";
-  }
-  return true;
+  return fieldType !== undefined && derive.sourceTypes.includes(fieldType);
 }
 
 export function channelFnKind(state: ChannelState): ChannelFnKind {
   if (typeof state.aggregate === "string") {
-    return "aggregate";
+    return state.aggregate;
   }
-  if (state.bin) {
-    return "bin";
-  }
-  if (typeof state.timeUnit === "string") {
-    return "timeUnit";
+  for (const kind of ENCODING_DERIVE_KINDS) {
+    if (channelDeriveState(kind, state) !== undefined) {
+      return kind;
+    }
   }
   return "none";
 }
@@ -84,9 +80,105 @@ export function channelFnPatch(
   kind: ChannelFnKind,
   value?: string,
 ): Partial<ChannelState> {
-  return {
-    aggregate: kind === "aggregate" ? value : undefined,
-    bin: kind === "bin" ? true : undefined,
-    timeUnit: kind === "timeUnit" ? (value ?? "year") : undefined,
-  };
+  const patch: Record<string, unknown> = { aggregate: undefined };
+  for (const deriveKind of ENCODING_DERIVE_KINDS) {
+    const key = channelDerive(deriveKind)?.channelKey;
+    if (key) {
+      patch[key] = undefined;
+    }
+  }
+  if (kind === "aggregate") {
+    patch.aggregate = value;
+    return patch as Partial<ChannelState>;
+  }
+  const derive = channelDerive(kind);
+  if (!derive?.encoding || !derive.channelKey) {
+    return patch as Partial<ChannelState>;
+  }
+  const transform = createDerivedTransform(
+    kind as keyof typeof DERIVE_SPECS,
+    { field: "", quantitativeField: "", temporalField: "" },
+  );
+  patch[derive.channelKey] = transform[derive.channelKey];
+  return patch as Partial<ChannelState>;
+}
+
+export function channelFnLabel(state: ChannelState): string {
+  const field =
+    typeof state.field === "string" && state.field ? state.field : undefined;
+  if (typeof state.aggregate === "string") {
+    return aggregateName(state.aggregate, field);
+  }
+  for (const kind of ENCODING_DERIVE_KINDS) {
+    const derived = channelDeriveState(kind, state);
+    if (derived !== undefined) {
+      return derivedName(
+        kind as keyof typeof DERIVE_SPECS,
+        derived as never,
+      );
+    }
+  }
+  return field ?? "—";
+}
+
+interface ChannelDerive {
+  encoding?: boolean;
+  sourceTypes?: readonly VegaType[];
+  channelKey?: keyof ChannelState;
+}
+
+function channelDerive(kind: string): ChannelDerive | undefined {
+  if (!Object.hasOwn(DERIVE_SPECS, kind)) {
+    return undefined;
+  }
+  return DERIVE_SPECS[
+    kind as keyof typeof DERIVE_SPECS
+  ] as unknown as ChannelDerive;
+}
+
+function channelDeriveState(
+  kind: string,
+  state: ChannelState,
+): unknown {
+  const derive = channelDerive(kind);
+  if (!derive?.channelKey) {
+    return undefined;
+  }
+  const value = state[derive.channelKey];
+  if (value === undefined || value === null || value === false) {
+    return undefined;
+  }
+  const field =
+    typeof state.field === "string" && state.field ? state.field : undefined;
+  if (!field) {
+    return undefined;
+  }
+  return readTransform(
+    kind as keyof typeof DERIVE_SPECS,
+    withTransformMetadata({
+      as: "channel",
+      field,
+      [derive.channelKey]: value,
+    }),
+  );
+}
+
+export function activeDeriveKind(
+  state: ChannelState,
+): EncodingDeriveKind | undefined {
+  return ENCODING_DERIVE_KINDS.find((kind) =>
+    hasDeriveKind(state, kind),
+  );
+}
+
+export function hasDerive(state: ChannelState): boolean {
+  return activeDeriveKind(state) !== undefined;
+}
+
+export function hasDeriveKind(
+  state: ChannelState,
+  kind: EncodingDeriveKind,
+): boolean {
+  const channelKey = DERIVE_SPECS[kind].channelKey;
+  return channelKey ? Boolean(state[channelKey]) : false;
 }

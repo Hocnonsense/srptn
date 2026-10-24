@@ -104,7 +104,13 @@ export function createChartStore(): StoreApi<ChartStore> {
     },
 
     replaceState(state) {
-      set({ state, activeLayerIndex: 0 });
+      set(({ activeLayerIndex }) => ({
+        state,
+        activeLayerIndex: Math.min(
+          activeLayerIndex,
+          Math.max(0, state.layers.length - 1),
+        ),
+      }));
     },
 
     patchState(patch) {

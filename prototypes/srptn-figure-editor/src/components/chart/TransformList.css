@@ -10,7 +10,7 @@
 }
 
 .transform-row-derive {
-  grid-template-columns: 28px 60px auto minmax(80px, 1fr) minmax(80px, 1fr);
+  grid-template-columns: 28px 60px auto minmax(0, 1fr);
 }
 
 .transform-row select {
@@ -48,4 +48,21 @@
 .transform-row input {
   width: 100%;
   min-width: 0;
+}
+
+.derive-params {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.derive-params input {
+  flex: 1 1 100px;
+  width: auto;
+}
+
+.derive-params select {
+  flex: 0 1 auto;
 }

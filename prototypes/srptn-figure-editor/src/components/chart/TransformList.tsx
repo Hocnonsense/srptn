@@ -1,5 +1,9 @@
 import { useChartStore } from "../../lib/chart/state/chart-store";
-import type { Scope } from "../../lib/chart/state/types";
+import {
+  clampLayerIndex,
+  type ChartState,
+  type Scope,
+} from "../../lib/chart/state/types";
 import { collectAggregateOps } from "../../lib/chart/engine/aggregate";
 import { unusedOutputs } from "../../lib/chart/engine/usage";
 import {
@@ -13,10 +17,20 @@ import { FilterRow } from "./FilterRow";
 import { RowList } from "./Rows";
 import "./TransformList.css";
 
-export function TransformList({ scope = "layer" }: { scope?: Scope }) {
+export function TransformList({
+  scope = "layer",
+  state: override,
+}: {
+  scope?: Scope;
+  state?: ChartState;
+}) {
   const table = useChartStore((store) => store.table);
-  const state = useChartStore((store) => store.state);
-  const activeLayerIndex = useChartStore((store) => store.activeLayerIndex);
+  const storeState = useChartStore((store) => store.state);
+  const state = override ?? storeState;
+  const storeActiveLayerIndex = useChartStore(
+    (store) => store.activeLayerIndex,
+  );
+  const activeLayerIndex = clampLayerIndex(state, storeActiveLayerIndex);
   const layer = state.layers[activeLayerIndex] ?? state.layers[0];
   const transforms = scope === "shared" ? state.shared.transform : layer.transform;
   const unused = unusedOutputs(state, scope, activeLayerIndex);

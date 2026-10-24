@@ -1,4 +1,5 @@
 import type { VegaType } from "../schema/table-schema";
+import type { ChannelState } from "../state/types";
 import { enumOf, fieldAt, fieldsOf } from "../schema/vl-schema";
 
 const COMMON_TIME_UNITS = [
@@ -66,7 +67,8 @@ export interface DeriveCreateContext {
 
 export interface DeriveControl<K extends string = string> {
   key: K;
-  kind: "text" | "number" | "field" | "timeUnit";
+  kind: "text" | "number" | "field" | "select";
+  options?: readonly string[];
   placeholder?: string;
   min?: number;
 }
@@ -83,6 +85,8 @@ export interface DeriveSpec<
   name: (state: N) => string;
   outputType?: VegaType;
   encoding?: boolean;
+  sourceTypes?: readonly VegaType[];
+  channelKey?: keyof ChannelState;
   create: (context: DeriveCreateContext) => S;
   update: (state: S, patch: Partial<S>) => S;
 }
@@ -258,6 +262,8 @@ export const DERIVE_SPECS = {
         : `bin(${state.field})`,
     outputType: "quantitative",
     encoding: true,
+    sourceTypes: ["quantitative", "temporal"],
+    channelKey: "bin",
     create: ({ field, quantitativeField }) => ({
       field: quantitativeField ?? field,
       maxbins: 10,
@@ -278,6 +284,8 @@ export const DERIVE_SPECS = {
     name: (state) => `timeUnit(${state.field}, ${state.timeUnit})`,
     outputType: "temporal",
     encoding: true,
+    sourceTypes: ["temporal"],
+    channelKey: "timeUnit",
     create: ({ field, temporalField }) => ({
       field: temporalField ?? field,
       timeUnit: "yearmonth",
@@ -285,6 +293,8 @@ export const DERIVE_SPECS = {
     update: (state, patch) => ({ ...state, ...patch }),
   }),
 };
+
+export type EncodingDeriveKind = Exclude<keyof typeof DERIVE_SPECS, "calculate">;
 
 type Specs = typeof DERIVE_SPECS;
 type StateOf<K extends keyof Specs> = Specs[K] extends DeriveSpec<infer S, infer _N> ? S : never;
@@ -442,7 +452,7 @@ function controlsOf<K extends keyof Specs>(
       const placeholder =
         typeof binding === "string" ? undefined : binding.placeholder;
       if (path === "timeUnit") {
-        return { key, kind: "timeUnit" };
+        return { key, kind: "select", options: TIME_UNITS };
       }
       const field = fieldAt(spec.ref, path);
       if (field?.type === "number" || field?.types?.includes("number")) {
@@ -456,6 +466,13 @@ function controlsOf<K extends keyof Specs>(
       return { key, kind: "text", placeholder };
     },
   );
+}
+
+export function deriveControls<K extends keyof Specs>(
+  kind: K,
+): DeriveControl<keyof StateOf<K> & string>[] {
+  const spec = DERIVE_SPECS[kind] as Specs[K];
+  return controlsOf(spec).filter((control) => control.key !== spec.sourceKey);
 }
 
 export function readDerivedTransform(

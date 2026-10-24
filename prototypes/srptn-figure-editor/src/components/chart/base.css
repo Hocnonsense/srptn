@@ -194,6 +194,7 @@ select.chip {
 
 .channel-select,
 .field-select,
+.channel-param,
 .theme-panel select,
 .theme-panel input,
 .transform-row select,
@@ -203,4 +204,32 @@ select.chip {
   background: #fff;
   padding: 4px 6px;
   font-size: 12px;
+}
+
+.panel-stack {
+  margin-top: 6px;
+}
+
+.panel-toggle {
+  border: 0;
+  background: transparent;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+}
+
+.panel-toggle:hover {
+  border: 0;
+}
+
+.panel-toggle:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.panel.is-open {
+  border-color: #cbd5e1;
 }

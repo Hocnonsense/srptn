@@ -2,7 +2,6 @@ import { Fragment } from "react";
 
 import {
   DERIVE_SPECS,
-  TIME_UNITS,
   createDerivedTransform,
   isDeriveKind,
   readDerivedTransform,
@@ -11,6 +10,7 @@ import {
 import type { DeriveControl } from "../../lib/chart/engine/transforms";
 import { useChartStore } from "../../lib/chart/state/chart-store";
 import type { Scope } from "../../lib/chart/state/types";
+import { ParamControl } from "./ParamControl";
 import { Row } from "./Rows";
 
 interface DeriveRowProps {
@@ -77,64 +77,29 @@ export function DeriveRow({
     const value = (derived.state as unknown as Record<string, unknown>)[
       control.key
     ];
-    switch (control.kind) {
-      case "field":
-        return (
-          <select
-            value={typeof value === "string" ? value : ""}
-            onChange={(event) =>
-              updateDerived({ [control.key]: event.target.value })
-            }
-          >
-            {[...availableFields].map(([name, type]) => (
-              <option key={name} value={name}>
-                {name} ({type})
-              </option>
-            ))}
-          </select>
-        );
-      case "number":
-        return (
-          <input
-            type="number"
-            min={control.min}
-            placeholder={control.placeholder}
-            value={typeof value === "number" ? value : ""}
-            onChange={(event) =>
-              updateDerived({
-                [control.key]: event.target.value
-                  ? Number(event.target.value)
-                  : undefined,
-              })
-            }
-          />
-        );
-      case "timeUnit":
-        return (
-          <select
-            value={typeof value === "string" ? value : ""}
-            onChange={(event) =>
-              updateDerived({ [control.key]: event.target.value })
-            }
-          >
-            {TIME_UNITS.map((unit) => (
-              <option key={unit} value={unit}>
-                {unit}
-              </option>
-            ))}
-          </select>
-        );
-      case "text":
-        return (
-          <input
-            value={typeof value === "string" ? value : ""}
-            placeholder={control.placeholder}
-            onChange={(event) =>
-              updateDerived({ [control.key]: event.target.value })
-            }
-          />
-        );
+    if (control.kind === "field") {
+      return (
+        <select
+          value={typeof value === "string" ? value : ""}
+          onChange={(event) =>
+            updateDerived({ [control.key]: event.target.value })
+          }
+        >
+          {[...availableFields].map(([name, type]) => (
+            <option key={name} value={name}>
+              {name} ({type})
+            </option>
+          ))}
+        </select>
+      );
     }
+    return (
+      <ParamControl
+        control={control}
+        value={value}
+        onChange={(next) => updateDerived({ [control.key]: next })}
+      />
+    );
   };
 
   return (
@@ -158,9 +123,11 @@ export function DeriveRow({
           </option>
         ))}
       </select>
-      {derived.controls.map((control) => (
-        <Fragment key={control.key}>{renderControl(control)}</Fragment>
-      ))}
+      <div className="derive-params">
+        {derived.controls.map((control) => (
+          <Fragment key={control.key}>{renderControl(control)}</Fragment>
+        ))}
+      </div>
     </Row>
   );
 }

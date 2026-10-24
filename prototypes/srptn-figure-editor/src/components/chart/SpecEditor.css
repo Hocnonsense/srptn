@@ -1,29 +1,9 @@
-.spec-block {
-  margin-top: 6px;
-  background: #fff;
-  border: 1px solid #e2e8f0;
-  border-radius: 9px;
-  padding: 12px;
-  box-shadow: 0 1px 2px rgb(15 23 42 / 4%);
-}
-
 .spec-toggle {
   width: 100%;
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  border: 0;
-  background: transparent;
   padding: 2px 0;
-  color: #334155;
-  font-size: 13px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.spec-toggle:hover {
-  border: 0;
 }
 
 .spec-note {

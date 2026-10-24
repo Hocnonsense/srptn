@@ -14,10 +14,12 @@ import {
 import { AdvancedFields } from "./chart/AdvancedFields";
 import { DataPanel } from "./chart/DataPanel";
 import { LayerEditor } from "./chart/LayerEditor";
+import { RecommendPanel } from "./chart/RecommendPanel";
 import { SharedEditor } from "./chart/SharedEditor";
 import { Preview } from "./chart/Preview";
 import { SpecEditor } from "./chart/SpecEditor";
 import { ThemePanel } from "./chart/ThemePanel";
+import { useRecommendationSession } from "./chart/useRecommendationSession";
 
 export function App({ store }: { store: StoreApi<ChartStore> }) {
   return (
@@ -33,6 +35,12 @@ function Editor() {
   const reset = useChartStore((store) => store.reset);
   const replaceState = useChartStore((store) => store.replaceState);
   const [specEditing, setSpecEditing] = useState(false);
+  const recommendation = useRecommendationSession({
+    state,
+    table,
+    replaceState,
+    specEditing,
+  });
 
   const spec = useMemo(
     () => buildSpec(state, { includeData: true, rows: table.rows }),
@@ -42,9 +50,19 @@ function Editor() {
     () => buildSpec(state, { includeData: false }),
     [state],
   );
-  const issues = useMemo(
-    () => [...validateChartState(state), ...validateSpec(spec)],
-    [state, spec],
+  const previewState = recommendation.previewState;
+  const displayState = recommendation.open ? recommendation.previewState : undefined;
+  const previewSpec = useMemo(
+    () =>
+      buildSpec(previewState, { includeData: true, rows: table.rows }),
+    [previewState, table.rows],
+  );
+  const previewIssues = useMemo(
+    () => [
+      ...validateChartState(previewState),
+      ...validateSpec(previewSpec),
+    ],
+    [previewState, previewSpec],
   );
 
   return (
@@ -64,9 +82,12 @@ function Editor() {
           <DataPanel table={table} />
 
           <section className="panel editor-card">
-            <fieldset className="editor-fields" disabled={specEditing}>
-              <SharedEditor />
-              <LayerEditor />
+            <fieldset
+              className="editor-fields"
+              disabled={specEditing || recommendation.open}
+            >
+              <SharedEditor state={displayState} />
+              <LayerEditor state={displayState} />
               <ThemePanel />
               <AdvancedFields state={state} onApply={replaceState} />
             </fieldset>
@@ -77,10 +98,25 @@ function Editor() {
             exportSpec={spec}
             onApply={replaceState}
             onEditingChange={setSpecEditing}
+            disabled={recommendation.open}
           />
         </div>
-        <Preview spec={spec} issues={issues} />
-
+        <div
+          className={`preview-slot ${recommendation.open ? "is-reserved" : ""}`}
+        >
+          <Preview spec={previewSpec} issues={previewIssues} />
+        </div>
+        <RecommendPanel
+          table={table}
+          baseline={recommendation.baseline}
+          open={recommendation.open}
+          specEditing={specEditing}
+          error={recommendation.error}
+          onOpen={recommendation.openRecommendations}
+          onPreview={recommendation.previewRecommendation}
+          onApply={recommendation.applyRecommendation}
+          onCancel={recommendation.cancelRecommendations}
+        />
       </main>
     </div>
   );

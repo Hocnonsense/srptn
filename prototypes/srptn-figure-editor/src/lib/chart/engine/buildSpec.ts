@@ -21,6 +21,7 @@ export function buildSpec(
   state: ChartState,
   options: BuildOptions = {},
 ): Record<string, unknown> {
+  const facet = facetChannels(state.shared.encoding);
   const sharedAggregates = collectAggregateOps(state.shared.transform);
   const sharedAggregateNames = new Set(
     sharedAggregates.map((aggregate) => aggregate.name),
@@ -93,7 +94,38 @@ export function buildSpec(
       }
     });
   }
+  if (facet) {
+    const { $schema, data, ...inner } = pruned;
+    return { $schema, data, facet, spec: inner };
+  }
   return pruned;
+}
+
+function facetChannels(
+  encoding: Record<string, ChannelState>,
+): Record<string, unknown> | undefined {
+  const row = encoding.row;
+  const column = encoding.column;
+  if (row || column) {
+    return {
+      ...(row ? { row: facetField(row) } : {}),
+      ...(column ? { column: facetField(column) } : {}),
+    };
+  }
+  const facet = encoding.facet;
+  return facet ? { ...facetField(facet) } : undefined;
+}
+
+function facetField(state: ChannelState): Record<string, unknown> {
+  return {
+    ...(typeof state.field === "string" ? { field: state.field } : {}),
+    ...(typeof state.type === "string" ? { type: state.type } : {}),
+    ...(state.header ? { header: state.header } : {}),
+  };
+}
+
+function isFacetChannel(channel: string): boolean {
+  return channel === "row" || channel === "column" || channel === "facet";
 }
 
 function buildEncoding(
@@ -101,6 +133,9 @@ function buildEncoding(
 ): Record<string, unknown> {
   const encoding: Record<string, unknown> = {};
   for (const [channel, channelState] of Object.entries(source)) {
+    if (isFacetChannel(channel)) {
+      continue;
+    }
     const fieldDef = pruneChannel(channelState);
     if (fieldDef) {
       encoding[channel] = fieldDef;
@@ -159,8 +194,8 @@ function applyRaw(
   if (raw.encoding && Object.keys(raw.encoding).length > 0) {
     const encoding =
       target.encoding &&
-      typeof target.encoding === "object" &&
-      !Array.isArray(target.encoding)
+        typeof target.encoding === "object" &&
+        !Array.isArray(target.encoding)
         ? (target.encoding as Record<string, unknown>)
         : {};
     target.encoding = { ...encoding, ...raw.encoding };

@@ -14,11 +14,13 @@ export function SpecEditor({
   exportSpec,
   onApply,
   onEditingChange,
+  disabled = false,
 }: {
   spec: Record<string, unknown>;
   exportSpec: Record<string, unknown>;
   onApply: (state: ChartState) => void;
   onEditingChange?: (editing: boolean) => void;
+  disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState(() => editableSpecText(spec));
@@ -33,6 +35,9 @@ export function SpecEditor({
   }, [spec, open, dirty]);
 
   const openEditor = () => {
+    if (disabled) {
+      return;
+    }
     setText(editableSpecText(spec));
     setDirty(false);
     setError(undefined);
@@ -58,6 +63,9 @@ export function SpecEditor({
   };
 
   const toggle = () => {
+    if (disabled) {
+      return;
+    }
     if (open) {
       closeAndApply();
     } else {
@@ -76,8 +84,15 @@ export function SpecEditor({
   };
 
   return (
-    <section className={`spec-block ${open ? "is-open" : ""}`}>
-      <button type="button" className="spec-toggle" onClick={toggle}>
+    <section
+      className={`panel panel-stack spec-block ${open ? "is-open" : ""}`}
+    >
+      <button
+        type="button"
+        className="panel-toggle spec-toggle"
+        onClick={toggle}
+        disabled={disabled}
+      >
         <span>Save spec</span>
         <span className="muted">
           {open ? "collapse & apply" : "expand to edit"}

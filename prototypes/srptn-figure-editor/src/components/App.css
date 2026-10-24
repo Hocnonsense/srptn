@@ -81,3 +81,7 @@
   border-top: 1px dashed #e2e8f0;
   padding-top: 8px;
 }
+
+.preview-slot.is-reserved .chart-host {
+  height: 360px;
+}

@@ -3,10 +3,15 @@ import { useState } from "react";
 import {
   AGGREGATE_OPS,
   CHANNELS,
+  FACET_CHANNELS,
   markChannelRule,
 } from "../../lib/chart/metamodel/rules";
 import { isVegaType, VEGA_TYPE_META } from "../../lib/chart/schema/table-schema";
-import type { Scope } from "../../lib/chart/state/types";
+import {
+  clampLayerIndex,
+  type ChartState,
+  type Scope,
+} from "../../lib/chart/state/types";
 import { useChartStore } from "../../lib/chart/state/chart-store";
 import {
   aggregateOutputType,
@@ -16,19 +21,31 @@ import {
   ENCODING_DERIVE_KINDS,
   channelFnAllowed,
   channelFnKind,
+  channelFnLabel,
   channelFnParams,
   channelFnPatch,
 } from "../../lib/chart/engine/channelFn";
 import { derivedFields } from "../../lib/chart/engine/fields";
 import type { ChoiceOption } from "../../lib/chart/engine/options";
 import "./ChannelShelf.css";
+import { ParamControl } from "./ParamControl";
 import { Row, RowList } from "./Rows";
 import { TypeBadge } from "./TypeBadge";
 
-export function ChannelShelf({ scope = "layer" }: { scope?: Scope }) {
-  const state = useChartStore((store) => store.state);
+export function ChannelShelf({
+  scope = "layer",
+  state: override,
+}: {
+  scope?: Scope;
+  state?: ChartState;
+}) {
+  const storeState = useChartStore((store) => store.state);
+  const state = override ?? storeState;
   const table = useChartStore((store) => store.table);
-  const activeLayerIndex = useChartStore((store) => store.activeLayerIndex);
+  const storeActiveLayerIndex = useChartStore(
+    (store) => store.activeLayerIndex,
+  );
+  const activeLayerIndex = clampLayerIndex(state, storeActiveLayerIndex);
   const options = useChartStore((store) => store.options);
   const setField = useChartStore((store) => store.setField);
   const setChannel = useChartStore((store) => store.setChannel);
@@ -68,17 +85,30 @@ export function ChannelShelf({ scope = "layer" }: { scope?: Scope }) {
   const channelsInLayers = new Set(
     state.layers.flatMap((item) => Object.keys(item.encoding)),
   );
-  const addable = CHANNELS.filter(
-    (channel) =>
-      !active.includes(channel) &&
-      (scope === "shared"
-        ? channelsInLayers.has(channel) &&
+  const sharedChannels = [
+    ...CHANNELS,
+    ...[...FACET_CHANNELS].filter((channel) => channel !== "facet"),
+  ];
+  const addable = (
+    scope === "shared" ? sharedChannels : CHANNELS
+  ).filter((channel) => {
+    if (active.includes(channel)) {
+      return false;
+    }
+    if (scope === "shared") {
+      if (FACET_CHANNELS.has(channel as never)) {
+        return true;
+      }
+      return (
+        channelsInLayers.has(channel) &&
         state.layers.some(
           (item) =>
             markChannelRule(item.mark, channel).status !== "invalid",
         )
-        : markChannelRule(layer.mark, channel).status !== "invalid"),
-  );
+      );
+    }
+    return markChannelRule(layer.mark, channel).status !== "invalid";
+  });
 
   const moveChannel = (from: string, to: string) => {
     if (!to) {
@@ -113,7 +143,7 @@ export function ChannelShelf({ scope = "layer" }: { scope?: Scope }) {
               setEditing(editing === channel ? null : channel)
             }
           >
-            {channel}={String(source[channel]?.field ?? "—")}
+            {channel}={channelFnLabel(source[channel] ?? {})}
           </button>
         ))}
         <button
@@ -157,10 +187,13 @@ export function ChannelShelf({ scope = "layer" }: { scope?: Scope }) {
               : undefined;
             const canAggregate = fieldType === "quantitative";
             const fn = channelFnKind(channelState);
+            const params = channelFnParams(fn);
             const setFunction = (value: string) => {
               if (value === "none") {
                 setChannel(channel, channelFnPatch("none"), scope);
-              } else if (ENCODING_DERIVE_KINDS.includes(value)) {
+              } else if (
+                (ENCODING_DERIVE_KINDS as readonly string[]).includes(value)
+              ) {
                 setChannel(channel, channelFnPatch(value), scope);
               } else {
                 setChannel(
@@ -261,6 +294,7 @@ export function ChannelShelf({ scope = "layer" }: { scope?: Scope }) {
                     setField(channel, value || undefined, scope);
                   }}
                 >
+                  <option value="">—</option>
                   {allFieldOptions.map((option) => (
                     <option
                       key={String(option.value)}
@@ -300,52 +334,21 @@ export function ChannelShelf({ scope = "layer" }: { scope?: Scope }) {
                   ))}
                 </select>
 
-                {channelFnParams(fn).map((param) => {
-                  const value = param.value(channelState);
-                  if (param.kind === "number") {
-                    return (
-                      <input
+                {params.length > 0 && (
+                  <div className="channel-params">
+                    {params.map((param) => (
+                      <ParamControl
                         key={param.key}
+                        control={param}
                         className="channel-param"
-                        type="number"
-                        min={param.min}
-                        placeholder={param.placeholder}
-                        value={typeof value === "number" ? String(value) : ""}
-                        onChange={(event) =>
-                          setChannel(
-                            channel,
-                            param.patch(
-                              event.target.value
-                                ? Number(event.target.value)
-                                : undefined,
-                            ),
-                            scope,
-                          )
+                        value={param.value(channelState)}
+                        onChange={(next) =>
+                          setChannel(channel, param.patch(next), scope)
                         }
                       />
-                    );
-                  }
-                  return (
-                    <select
-                      key={param.key}
-                      className="channel-param"
-                      value={typeof value === "string" ? value : ""}
-                      onChange={(event) =>
-                        setChannel(
-                          channel,
-                          param.patch(event.target.value),
-                          scope,
-                        )
-                      }
-                    >
-                      {param.options?.map((option) => (
-                        <option key={option} value={option}>
-                          {option}
-                        </option>
-                      ))}
-                    </select>
-                  );
-                })}
+                    ))}
+                  </div>
+                )}
 
               </Row>
             );

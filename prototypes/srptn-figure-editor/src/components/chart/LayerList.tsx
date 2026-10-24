@@ -1,11 +1,19 @@
-import { useChartStore } from "../../lib/chart/state/chart-store";
 import { enumOf } from "../../lib/chart/schema/vl-schema";
+import { useChartStore } from "../../lib/chart/state/chart-store";
+import {
+  clampLayerIndex,
+  type ChartState,
+} from "../../lib/chart/state/types";
 
 const MARKS = enumOf("#/definitions/Mark");
 
-export function LayerList() {
-  const state = useChartStore((store) => store.state);
-  const activeLayerIndex = useChartStore((store) => store.activeLayerIndex);
+export function LayerList({ state: override }: { state?: ChartState }) {
+  const storeState = useChartStore((store) => store.state);
+  const storeActiveLayerIndex = useChartStore(
+    (store) => store.activeLayerIndex,
+  );
+  const state = override ?? storeState;
+  const activeLayerIndex = clampLayerIndex(state, storeActiveLayerIndex);
   const setActiveLayer = useChartStore((store) => store.setActiveLayer);
   const setMark = useChartStore((store) => store.setMark);
   const addLayer = useChartStore((store) => store.addLayer);

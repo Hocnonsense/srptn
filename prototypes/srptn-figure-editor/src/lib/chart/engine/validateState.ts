@@ -1,10 +1,17 @@
 import type { ChartState, ChannelState } from "../state/types";
+import {
+  activeDeriveKind,
+  channelFnAllowed,
+  hasDerive,
+} from "./channelFn";
+import { DERIVE_SPECS } from "./transforms";
 import type { ValidationIssue } from "./validate";
 
 const RAW_MEASURES = new Set(["x", "y"]);
 
 export function validateChartState(state: ChartState): ValidationIssue[] {
   const issues: ValidationIssue[] = [
+    ...validateFacets(state),
     ...validateEncoding(state.shared.encoding, "/shared/encoding"),
     ...groupKeyWarnings(
       state.shared.encoding,
@@ -47,8 +54,7 @@ function groupKeyWarnings(
       channelState?.field &&
       channelState.type === "quantitative" &&
       !channelState.aggregate &&
-      !channelState.bin &&
-      !channelState.timeUnit
+      !hasDerive(channelState)
     ) {
       issues.push({
         severity: "warning",
@@ -80,10 +86,10 @@ function validateEncoding(
   const issues: ValidationIssue[] = [];
   for (const [channel, channelState] of Object.entries(encoding)) {
     const path = `${pathPrefix}/${channel}`;
+    const derive = activeDeriveKind(channelState);
     const fields = [
       channelState.aggregate ? "aggregate" : undefined,
-      channelState.bin ? "bin" : undefined,
-      channelState.timeUnit ? "timeUnit" : undefined,
+      derive,
     ].filter(Boolean);
 
     if (fields.length > 1) {
@@ -106,24 +112,43 @@ function validateEncoding(
         message: "Aggregate requires a quantitative field.",
       });
     }
-    if (
-      channelState.bin &&
-      channelState.type !== "quantitative" &&
-      channelState.type !== "temporal"
-    ) {
+    if (derive && !channelFnAllowed(derive, channelState.type)) {
+      const types = DERIVE_SPECS[derive].sourceTypes ?? [];
+      const label = derive.charAt(0).toUpperCase() + derive.slice(1);
       issues.push({
         severity: "error",
         path,
-        message: "Bin requires a quantitative or temporal field.",
-      });
-    }
-    if (channelState.timeUnit && channelState.type !== "temporal") {
-      issues.push({
-        severity: "error",
-        path,
-        message: "timeUnit requires a temporal field.",
+        message: `${label} requires ${types.join(" or ")} field.`,
       });
     }
   }
+  return issues;
+}
+
+function validateFacets(state: ChartState): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  const shared = state.shared.encoding;
+  const facetKeys = ["row", "column", "facet"].filter(
+    (channel) => shared[channel],
+  );
+  if (facetKeys.length > 1 && facetKeys.includes("facet")) {
+    issues.push({
+      severity: "error",
+      path: "/shared/encoding/facet",
+      message:
+        "Use either facet or row/column, not both.",
+    });
+  }
+  state.layers.forEach((layer, index) => {
+    for (const channel of ["row", "column", "facet"]) {
+      if (layer.encoding[channel]) {
+        issues.push({
+          severity: "error",
+          path: `/layers/${index}/encoding/${channel}`,
+          message: "Facet channels belong to shared encoding.",
+        });
+      }
+    }
+  });
   return issues;
 }

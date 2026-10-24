@@ -13,6 +13,7 @@ const ROOT_KEYS = new Set([
   "height",
   "background",
   "config",
+  "facet",
   "layer",
   "spec",
 ]);
@@ -74,6 +75,18 @@ export function parseSpec(spec: Record<string, unknown>): ChartState {
   }
   if (isRecord(root.config)) {
     state.config = { ...root.config };
+  }
+  if (isRecord(root.facet)) {
+    const facet = root.facet;
+    if (isRecord(facet.row)) {
+      state.shared.encoding.row = { ...facet.row } as ChannelState;
+    }
+    if (isRecord(facet.column)) {
+      state.shared.encoding.column = { ...facet.column } as ChannelState;
+    }
+    if (typeof facet.field === "string" && typeof facet.type === "string") {
+      state.shared.encoding.facet = { ...facet } as ChannelState;
+    }
   }
 
   for (const [key, value] of Object.entries(root)) {
